@@ -26,8 +26,8 @@ export function CreateWorkshopDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>+ New Workshop</Button>
+      <DialogTrigger>
+        + New Workshop
       </DialogTrigger>
 
       <DialogContent className="sm:max-w-xl">
