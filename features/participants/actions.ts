@@ -1,3 +1,4 @@
+THIS_SHOULD_BREAK;
 "use server";
 
 import { participantSchema } from "./schema";
