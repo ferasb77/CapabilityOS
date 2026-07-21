@@ -22,7 +22,7 @@ export async function checkInParticipant(
   if (!parsed.success) {
     return {
       success: false,
-      message: "Please correct the highlighted fields.",
+      message: JSON.stringify(values),
       fieldErrors: parsed.error.flatten().fieldErrors,
     };
   }
