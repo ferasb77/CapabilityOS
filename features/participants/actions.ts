@@ -8,19 +8,29 @@ export async function checkInParticipant(
   _: CheckInResult | null,
   formData: FormData
 ): Promise<CheckInResult> {
-const values = {
-  workshopSlug: formData.get("workshopSlug"),
-  firstName: formData.get("firstName"),
-  lastName: formData.get("lastName"),
-  email: formData.get("email"),
-  mobile: formData.get("mobile"),
-  company: formData.get("company"),
-  jobTitle: formData.get("jobTitle"),
-};
+  const values = {
+    workshopSlug: formData.get("workshopSlug"),
+    firstName: formData.get("firstName"),
+    lastName: formData.get("lastName"),
+    email: formData.get("email"),
+    mobile: formData.get("mobile"),
+    company: formData.get("company"),
+    jobTitle: formData.get("jobTitle"),
+  };
 
-console.log(values);
+  console.log(values);
 
-const parsed = participantSchema.safeParse(values);
+  const parsed = participantSchema.safeParse(values);
+
+  if (!parsed.success) {
+    console.error(parsed.error.flatten());
+
+    return {
+      success: false,
+      message: JSON.stringify(parsed.error.flatten().fieldErrors),
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    };
+  }
 
   const supabase = await createClient();
 
@@ -34,25 +44,18 @@ const parsed = participantSchema.safeParse(values);
   if (existing) {
     return {
       success: false,
-      message:
-        "This email has already checked in for this workshop.",
+      message: "This email has already checked in for this workshop.",
     };
   }
 
   const { error } = await supabase.from("participants").insert({
     workshop_slug: parsed.data.workshopSlug,
-
     first_name: parsed.data.firstName,
     last_name: parsed.data.lastName,
-
     email: parsed.data.email,
     mobile: parsed.data.mobile,
-
     company: parsed.data.company,
     job_title: parsed.data.jobTitle,
-
-    dietary_requirements: parsed.data.dietaryRequirements,
-
     checked_in: true,
     source: "QR",
   });
@@ -62,8 +65,7 @@ const parsed = participantSchema.safeParse(values);
 
     return {
       success: false,
-      message:
-        "Unable to complete check-in. Please try again.",
+      message: "Unable to complete check-in. Please try again.",
     };
   }
 
