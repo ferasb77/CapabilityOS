@@ -16,7 +16,7 @@ export async function checkInParticipant(
     mobile: formData.get("mobile"),
     company: formData.get("company"),
     jobTitle: formData.get("jobTitle"),
-    dietaryRequirements: formData.get("dietaryRequirements"),
+    dietaryRequirements: null,
   });
 
   if (!parsed.success) {

@@ -37,11 +37,7 @@ export const participantSchema = z.object({
     .trim()
     .min(2, "Job title is required"),
 
-  dietaryRequirements: z
-    .string()
-    .trim()
-    .optional()
-    .transform((value) => value || null),
+
 });
 
 export type ParticipantInput = z.infer<typeof participantSchema>;
