@@ -140,7 +140,17 @@ export function CheckInForm({
 
       {!state.success && state.message && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {state.message}
+          <p className="font-semibold">{state.message}</p>
+
+          {state.fieldErrors && (
+            <ul className="mt-2 list-disc pl-5">
+              {Object.entries(state.fieldErrors).map(([field, errors]) => (
+                <li key={field}>
+                  <strong>{field}:</strong> {errors?.join(", ")}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
