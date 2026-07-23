@@ -6,6 +6,7 @@ const STATUS_LABEL: Record<WorkshopStatus, string> = {
   draft: "Draft",
   active: "Active",
   completed: "Completed",
+  cancelled: "Cancelled",
 };
 
 type Props = {
@@ -23,6 +24,17 @@ export function WorkshopStatusBadge({ status, className }: Props) {
       <Badge
         variant="outline"
         className={cn("border-transparent bg-muted text-muted-foreground", className)}
+      >
+        {STATUS_LABEL[status]}
+      </Badge>
+    );
+  }
+
+  if (status === "cancelled") {
+    return (
+      <Badge
+        variant="outline"
+        className={cn("border-destructive/30 text-destructive", className)}
       >
         {STATUS_LABEL[status]}
       </Badge>

@@ -1,6 +1,6 @@
 import { createClient } from "@/infrastructure/supabase/server";
 
-export type WorkshopStatus = "draft" | "active" | "completed";
+export type WorkshopStatus = "draft" | "active" | "completed" | "cancelled";
 
 export type DashboardStats = {
   totalWorkshops: number;
