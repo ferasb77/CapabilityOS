@@ -11,6 +11,7 @@ export type DashboardStats = {
 
 export type WorkshopSummary = {
   id: string;
+  slug: string;
   title: string;
   venue: string | null;
   startDate: string;
@@ -31,7 +32,7 @@ export type ParticipantSummary = {
   createdAt: string;
 };
 
-export type AttentionReason = "capacity_remaining" | "no_participants";
+export type AttentionReason = "capacity_remaining" | "no_participants" | "survey_not_sent";
 
 export type AttentionItem = {
   workshopId: string;
@@ -49,13 +50,13 @@ export type DashboardData = {
 
 type WorkshopRow = {
   id: string;
+  slug: string;
   title: string;
   venue: string | null;
   start_date: string;
   end_date: string;
   capacity: number;
   status: WorkshopStatus;
-  slug: string;
 };
 
 type ParticipantRow = {
@@ -74,7 +75,7 @@ const RECENT_PARTICIPANTS_LIMIT = 10;
 export async function getDashboardData(): Promise<DashboardData> {
   const supabase = await createClient();
 
-  const [workshopsResult, participantsResult] = await Promise.all([
+  const [workshopsResult, participantsResult, surveyTokensResult] = await Promise.all([
     supabase
       .from("workshops")
       .select("id, title, venue, start_date, end_date, capacity, status, slug")
@@ -85,6 +86,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         "id, workshop_slug, first_name, last_name, company, job_title, checked_in, created_at"
       )
       .order("created_at", { ascending: false }),
+    supabase.from("survey_tokens").select("workshop_id"),
   ]);
 
   if (workshopsResult.error) {
@@ -95,8 +97,15 @@ export async function getDashboardData(): Promise<DashboardData> {
     throw new Error(participantsResult.error.message);
   }
 
+  if (surveyTokensResult.error) {
+    throw new Error(surveyTokensResult.error.message);
+  }
+
   const workshops: WorkshopRow[] = workshopsResult.data ?? [];
   const participants: ParticipantRow[] = participantsResult.data ?? [];
+  const workshopIdsWithSurveysSent = new Set(
+    (surveyTokensResult.data ?? []).map((token) => token.workshop_id)
+  );
 
   const participantsBySlug = new Map<string, ParticipantRow[]>();
   for (const participant of participants) {
@@ -112,6 +121,7 @@ export async function getDashboardData(): Promise<DashboardData> {
 
     return {
       id: workshop.id,
+      slug: workshop.slug,
       title: workshop.title,
       venue: workshop.venue,
       startDate: workshop.start_date,
@@ -153,6 +163,15 @@ export async function getDashboardData(): Promise<DashboardData> {
         title: workshop.title,
         reason: "no_participants",
         detail: "No participants registered yet",
+      });
+    }
+
+    if (workshop.status === "completed" && !workshopIdsWithSurveysSent.has(workshop.id)) {
+      attentionItems.push({
+        workshopId: workshop.id,
+        title: workshop.title,
+        reason: "survey_not_sent",
+        detail: "Survey has not been sent to any participant yet",
       });
     }
   }

@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import {
   Card,
   CardContent,
@@ -55,7 +57,11 @@ export function RecentWorkshopsPanel({ workshops }: Props) {
             <TableBody>
               {workshops.map((workshop) => (
                 <TableRow key={workshop.id}>
-                  <TableCell className="font-medium">{workshop.title}</TableCell>
+                  <TableCell className="font-medium">
+                    <Link href={`/dashboard/workshops/${workshop.slug}`} className="hover:text-gold">
+                      {workshop.title}
+                    </Link>
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {workshop.venue ?? "—"}
                   </TableCell>
