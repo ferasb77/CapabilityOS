@@ -1,21 +1,10 @@
-import { BRANDING } from "@/config/branding";
+import { redirect } from "next/navigation";
 
-export default function HomePage() {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50">
-      <div className="text-center">
-        <h1 className="text-5xl font-bold text-slate-900">
-          {BRANDING.productName}
-        </h1>
+import { getSessionContext } from "@/infrastructure/session/session-context";
 
-        <p className="mt-4 text-lg text-slate-600">
-          Delivery Operations Platform
-        </p>
-
-        <p className="mt-10 text-sm text-slate-500">
-          Version 0.1
-        </p>
-      </div>
-    </main>
-  );
+export default async function HomePage() {
+  // getSessionContext() redirects to /login itself when there's no session
+  // or no matching profile — reaching the line below means we're signed in.
+  await getSessionContext();
+  redirect("/dashboard");
 }
