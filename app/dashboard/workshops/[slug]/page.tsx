@@ -7,6 +7,8 @@ import { WorkshopStatusBadge } from "@/features/dashboard/components/workshop-st
 import { SurveyResultsPanel } from "@/features/surveys/components/survey-results-panel";
 import { LogisticsTab } from "@/features/workshops/components/logistics-tab";
 import { ParticipantsTab } from "@/features/workshops/components/participants-tab";
+import { RegistrationLinkPanel } from "@/features/workshops/components/registration-link-panel";
+import { WorkshopCreatedBanner } from "@/features/workshops/components/workshop-created-banner";
 import { WORKSHOP_TABS, WorkshopTabs, type WorkshopTabKey } from "@/features/workshops/components/workshop-tabs";
 import {
   getWorkshopBySlug,
@@ -30,12 +32,12 @@ function resolveTab(tab: string | undefined): WorkshopTabKey {
 
 type Props = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; created?: string }>;
 };
 
 export default async function WorkshopDetailPage({ params, searchParams }: Props) {
   const { slug } = await params;
-  const { tab } = await searchParams;
+  const { tab, created } = await searchParams;
   const activeTab = resolveTab(tab);
 
   const workshop = await getWorkshopBySlug(slug);
@@ -59,6 +61,13 @@ export default async function WorkshopDetailPage({ params, searchParams }: Props
   const isLocked = workshop.status === "completed" || workshop.status === "cancelled";
   const unsentSurveyCount = participants.filter((p) => p.surveyStatus === "not_sent").length;
 
+  // Registration only makes sense while a workshop is still open for
+  // sign-ups — draft (not yet public, but shareable ahead of launch) or
+  // active. Completed/cancelled workshops hide the link entirely.
+  const registrationOpen = workshop.status === "draft" || workshop.status === "active";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+  const registrationUrl = `${appUrl}/r/${workshop.slug}`;
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <Link
@@ -68,6 +77,8 @@ export default async function WorkshopDetailPage({ params, searchParams }: Props
         <ArrowLeft className="size-4" />
         Back to Dashboard
       </Link>
+
+      {created === "true" && <WorkshopCreatedBanner registrationUrl={registrationUrl} />}
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -91,10 +102,16 @@ export default async function WorkshopDetailPage({ params, searchParams }: Props
         </Button>
       </div>
 
+      {registrationOpen && <RegistrationLinkPanel url={registrationUrl} />}
+
       <WorkshopTabs slug={workshop.slug} activeTab={activeTab} />
 
       {activeTab === "participants" && (
-        <ParticipantsTab workshop={workshop} participants={participants} />
+        <ParticipantsTab
+          workshop={workshop}
+          participants={participants}
+          registrationUrl={registrationOpen ? registrationUrl : null}
+        />
       )}
 
       {activeTab === "survey" && surveyResults && (

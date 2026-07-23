@@ -124,7 +124,7 @@ export async function createWorkshop(
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/workshops");
-  redirect(`/dashboard/workshops/${inserted.slug}`);
+  redirect(`/dashboard/workshops/${inserted.slug}?created=true`);
 }
 
 export type UpdateWorkshopResult =

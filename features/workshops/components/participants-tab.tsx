@@ -19,6 +19,8 @@ import { SendSurveyButton } from "@/features/surveys/components/send-survey-butt
 import { SurveyStatusBadge } from "@/features/surveys/components/survey-status-badge";
 import type { WorkshopDetailRecord, WorkshopParticipant } from "@/features/workshops/data";
 
+import { CopyLinkButton } from "./copy-link-button";
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString("en-US", {
     month: "short",
@@ -56,22 +58,33 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
 type Props = {
   workshop: WorkshopDetailRecord;
   participants: WorkshopParticipant[];
+  /** null when the workshop is completed/cancelled — registration has ended, so no link to share. */
+  registrationUrl: string | null;
 };
 
-export function ParticipantsTab({ workshop, participants }: Props) {
+export function ParticipantsTab({ workshop, participants, registrationUrl }: Props) {
   const total = participants.length;
 
   if (total === 0) {
     return (
       <Card className="bg-surface-elevated">
-        <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+        <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
           <p className="text-ivory">No participants yet.</p>
-          <p className="max-w-md text-sm text-muted-foreground">
-            Share the public registration link to start collecting registrations:{" "}
-            <code className="rounded bg-night/60 px-1.5 py-0.5 text-gold">
-              /r/{workshop.slug}
-            </code>
-          </p>
+          {registrationUrl ? (
+            <div className="flex w-full max-w-lg flex-col items-center gap-3 sm:flex-row">
+              <p className="text-sm text-muted-foreground sm:text-left">
+                Share this link to start receiving registrations:
+              </p>
+              <code className="w-full truncate rounded bg-night/60 px-2.5 py-1.5 text-left text-xs text-gold sm:flex-1">
+                {registrationUrl}
+              </code>
+              <CopyLinkButton url={registrationUrl} className="shrink-0" />
+            </div>
+          ) : (
+            <p className="max-w-md text-sm text-muted-foreground">
+              Registration has ended for this workshop, and no one registered.
+            </p>
+          )}
         </CardContent>
       </Card>
     );
