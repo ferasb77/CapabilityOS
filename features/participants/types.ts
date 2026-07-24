@@ -25,6 +25,7 @@ export type CheckInResult =
   | {
       success: true;
       message: string;
+      materialsUrl: string | null;
     }
   | {
       success: false;

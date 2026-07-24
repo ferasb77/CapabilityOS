@@ -1,7 +1,11 @@
 import Image from "next/image";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, FolderOpen } from "lucide-react";
 
-export function SuccessScreen() {
+type Props = {
+  materialsUrl?: string | null;
+};
+
+export function SuccessScreen({ materialsUrl }: Props) {
   return (
     <div className="flex flex-col items-center py-8 text-center animate-in fade-in duration-500">
       <Image
@@ -40,6 +44,16 @@ export function SuccessScreen() {
           Thank you for joining us.
         </p>
       </div>
+
+      {materialsUrl && (
+        <a
+          href={materialsUrl}
+          className="mt-8 inline-flex items-center gap-2 rounded-xl bg-[#C8A24A] px-6 py-3 text-base font-semibold text-[#0B1018] transition-all duration-200 hover:bg-[#D9B765] hover:shadow-lg"
+        >
+          <FolderOpen size={20} />
+          Access Program Materials
+        </a>
+      )}
 
       <div className="mt-10 text-sm text-slate-500">
         Enable My Growth

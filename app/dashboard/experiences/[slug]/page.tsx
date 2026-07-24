@@ -8,6 +8,8 @@ import { SurveyResultsPanel } from "@/features/surveys/components/survey-results
 import { CustomSurveyResultsPanel } from "@/features/surveys/components/custom-survey-results-panel";
 import { SurveyTab } from "@/features/surveys/components/survey-tab";
 import { LearningImpactTab } from "@/features/surveys/components/learning-impact-tab";
+import { MaterialsTab } from "@/features/materials/components/materials-tab";
+import { getExperienceMaterials } from "@/features/materials/data";
 import {
   getExperienceSurveyConfig,
   getExperienceSurveyTemplate,
@@ -101,6 +103,18 @@ export default async function ExperienceDetailPage({ params, searchParams }: Pro
       : null;
 
   const impactData = activeTab === "impact" ? await getPrePostComparisonData(experience.id) : null;
+
+  const materialsTabData =
+    activeTab === "materials"
+      ? await (async () => {
+          const session = await getSessionContext();
+          const [participantMaterials, facilitatorMaterials] = await Promise.all([
+            getExperienceMaterials(experience.id, "participant"),
+            getExperienceMaterials(experience.id, "facilitator"),
+          ]);
+          return { workspaceId: session.workspaceId, participantMaterials, facilitatorMaterials };
+        })()
+      : null;
 
   const certificatesData =
     activeTab === "certificates"
@@ -261,6 +275,20 @@ export default async function ExperienceDetailPage({ params, searchParams }: Pro
           criteria={certificatesData.criteria}
           templates={certificatesData.templates}
           rows={certificatesData.rows}
+        />
+      )}
+
+      {activeTab === "materials" && materialsTabData && (
+        <MaterialsTab
+          experienceId={experience.id}
+          experienceSlug={experience.slug}
+          workspaceId={materialsTabData.workspaceId}
+          participantMaterials={materialsTabData.participantMaterials}
+          facilitatorMaterials={materialsTabData.facilitatorMaterials}
+          participants={participants.map((participant) => ({
+            id: participant.id,
+            fullName: `${participant.firstName} ${participant.lastName}`.trim(),
+          }))}
         />
       )}
     </div>

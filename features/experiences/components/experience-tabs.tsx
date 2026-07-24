@@ -9,6 +9,7 @@ export const EXPERIENCE_TABS = [
   { key: "surveys", label: "Surveys" },
   { key: "impact", label: "Learning Impact" },
   { key: "certificates", label: "Certificates" },
+  { key: "materials", label: "Materials" },
 ] as const;
 
 export type ExperienceTabKey = (typeof EXPERIENCE_TABS)[number]["key"];

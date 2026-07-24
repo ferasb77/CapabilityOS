@@ -3,8 +3,9 @@
 import { useActionState } from "react";
 import { checkInParticipant } from "../actions";
 import { SuccessScreen } from "./success-screen";
+import type { CheckInResult } from "../types";
 
-const initialState = {
+const initialState: CheckInResult = {
   success: false,
   message: "",
 };
@@ -20,7 +21,7 @@ export function CheckInForm({
   );
 
   if (state.success) {
-    return <SuccessScreen />;
+    return <SuccessScreen materialsUrl={state.materialsUrl} />;
   }
 
   return (

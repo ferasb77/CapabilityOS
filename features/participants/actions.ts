@@ -7,6 +7,8 @@ import { fetchFilteredParticipants } from "./data";
 import type { ParticipantFilters, ParticipantSurveyStatus } from "./data";
 import { maybeAutoIssueCertificate } from "@/features/certificates/actions";
 import { sendPreTrainingSurveyOnRegistration } from "@/features/surveys/actions";
+import { createOrGetMaterialToken } from "@/features/materials/actions";
+import { requireEnv } from "@/infrastructure/env";
 
 export async function checkInParticipant(
   _: CheckInResult | null,
@@ -82,6 +84,14 @@ export async function checkInParticipant(
   // block or fail the check-in itself. maybeAutoIssueCertificate already
   // swallows its own errors and is a no-op unless the experience has
   // auto-issue on and this participant is already eligible.
+  //
+  // The materials token is the one exception to "fire-and-forget": unlike
+  // the certificate/survey hooks, it's a single cheap DB find-or-insert
+  // with no external I/O, and its result (the token, to build the
+  // materials link) is needed immediately for the success screen's
+  // "Access Program Materials" button — so it's awaited, not void'd.
+  let materialsUrl: string | null = null;
+
   if (insertedParticipant) {
     const { data: experienceRow } = await supabase
       .from("experiences")
@@ -92,12 +102,22 @@ export async function checkInParticipant(
     if (experienceRow) {
       void maybeAutoIssueCertificate(insertedParticipant.id, experienceRow.id);
       void sendPreTrainingSurveyOnRegistration(insertedParticipant.id, experienceRow.id);
+
+      const token = await createOrGetMaterialToken(insertedParticipant.id, experienceRow.id);
+      if (token) {
+        try {
+          materialsUrl = `${requireEnv("NEXT_PUBLIC_APP_URL").replace(/\/$/, "")}/materials/${token}`;
+        } catch {
+          materialsUrl = null;
+        }
+      }
     }
   }
 
   return {
     success: true,
     message: "Check-in completed successfully.",
+    materialsUrl,
   };
 }
 
