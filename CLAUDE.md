@@ -195,6 +195,10 @@ Request → Auth middleware → Resolve organization + workspace → RLS enforce
 
 **Period comparison integrity:** Never compare a partial year against a full year without explicitly identifying the difference. When the current year is in progress, all year-over-year comparisons must use the equivalent elapsed period from the comparison year (e.g. Jan 1–Jul 25, 2026 vs Jan 1–Jul 25, 2024). Every comparison metric must show the period being compared. This rule applies to every intelligence query, insight, dashboard card, and trend indicator in the platform.
 
+**Intelligence Assistant Rule:** The AI may interpret and synthesize evidence, but it must never invent operational facts. Every factual claim in an AI response must be grounded in CapabilityOS data provided in the context. The assistant must distinguish between stating a fact (grounded in data) and making an inference (reasoned from patterns). When uncertain, the assistant says so.
+
+This rule governs the Intelligence Assistant (Layer 3 of the intelligence architecture, `features/intelligence/assistant-*`). The assistant never queries the database directly — it only reasons over a pre-built context object assembled from the deterministic Layer 1 (analytics) and Layer 2 (insights) functions in `features/intelligence/data.ts` and `features/intelligence/insights.ts`. This keeps every fact the assistant can cite traceable back to a verified query.
+
 ---
 
 ## Before writing any code — checklist
