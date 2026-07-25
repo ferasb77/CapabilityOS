@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Brain,
   Building2,
   GraduationCap,
   LayoutDashboard,
@@ -27,6 +28,7 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   Users,
   SquareUserRound,
   Package,
+  Brain,
   Settings,
 };
 

@@ -5,6 +5,7 @@ export type NavIconName =
   | "Users"
   | "SquareUserRound"
   | "Package"
+  | "Brain"
   | "Settings";
 
 export type NavItem = {
@@ -20,5 +21,6 @@ export const NAV_ITEMS: NavItem[] = [
   { title: "Participants", href: "/dashboard/participants", icon: "Users" },
   { title: "Facilitators", href: "/dashboard/facilitators", icon: "SquareUserRound" },
   { title: "Assets", href: "/dashboard/assets", icon: "Package" },
+  { title: "Intelligence", href: "/dashboard/intelligence", icon: "Brain" },
   { title: "Settings", href: "/dashboard/settings", icon: "Settings" },
 ];

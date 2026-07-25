@@ -3,15 +3,20 @@ import { Briefcase, Building2, ClipboardList, Plus, UserCheck } from "lucide-rea
 
 import { Button } from "@/components/ui/button";
 import { AttentionPanel } from "@/features/dashboard/components/attention-panel";
+import { IntelligenceSummary } from "@/features/dashboard/components/intelligence-summary";
 import { RecentExperiencesPanel } from "@/features/dashboard/components/recent-experiences-panel";
 import { RecentParticipantsPanel } from "@/features/dashboard/components/recent-participants-panel";
 import { StatCard } from "@/features/dashboard/components/stat-card";
+import { getDashboardIntelligenceSummary } from "@/features/intelligence/data";
 import { getDashboardData } from "@/infrastructure/repositories/dashboard";
 import { getSessionContext } from "@/infrastructure/session/session-context";
 
 export default async function DashboardPage() {
-  const [session, { stats, recentExperiences, recentParticipants, attentionItems }] =
-    await Promise.all([getSessionContext(), getDashboardData()]);
+  const session = await getSessionContext();
+  const [{ stats, recentExperiences, recentParticipants, attentionItems }, intelligenceSummary] = await Promise.all([
+    getDashboardData(),
+    getDashboardIntelligenceSummary(session.workspaceId),
+  ]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-8">
@@ -43,6 +48,8 @@ export default async function DashboardPage() {
       </div>
 
       <AttentionPanel items={attentionItems} />
+
+      <IntelligenceSummary summary={intelligenceSummary} />
 
       <div className="grid gap-6 xl:grid-cols-2">
         <RecentExperiencesPanel experiences={recentExperiences} />
