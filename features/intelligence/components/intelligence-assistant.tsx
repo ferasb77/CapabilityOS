@@ -98,21 +98,39 @@ type Props = {
   workspaceId: string;
   suggestedQuestions: string[];
   yearsOfData: number;
+  /** Pre-populated from the dashboard's "Ask CapabilityOS" prompt
+   * (?q=... in the URL) — asked automatically on first load so landing here
+   * from that shortcut doesn't require retyping the question. */
+  initialQuestion?: string;
 };
 
-export function IntelligenceAssistant({ workspaceId, suggestedQuestions, yearsOfData }: Props) {
+export function IntelligenceAssistant({ workspaceId, suggestedQuestions, yearsOfData, initialQuestion }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [lastFailedQuestion, setLastFailedQuestion] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const hasAutoAsked = useRef(false);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, isPending]);
+
+  useEffect(() => {
+    // Guarded with a ref (not just the empty dep array) because React's
+    // Strict Mode double-invokes effects in development — without this,
+    // the auto-ask fires twice and sends the question to the model twice.
+    if (initialQuestion?.trim() && !hasAutoAsked.current) {
+      hasAutoAsked.current = true;
+      submitQuestion(initialQuestion);
+    }
+    // Runs once on mount only — submitQuestion closes over the initial
+    // (empty) message history, which is exactly what the first auto-ask needs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function submitQuestion(question: string) {
     const trimmed = question.trim();

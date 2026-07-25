@@ -4,7 +4,12 @@ import { IntelligenceAssistant } from "@/features/intelligence/components/intell
 import { generateSuggestedQuestions } from "@/features/intelligence/suggested-questions";
 import { getSessionContext } from "@/infrastructure/session/session-context";
 
-export default async function AskIntelligencePage() {
+type Props = {
+  searchParams: Promise<{ q?: string }>;
+};
+
+export default async function AskIntelligencePage({ searchParams }: Props) {
+  const { q } = await searchParams;
   const session = await getSessionContext();
   const assistantContext = await buildAssistantContext(session.workspaceId);
   const suggestedQuestions = generateSuggestedQuestions(assistantContext);
@@ -26,6 +31,7 @@ export default async function AskIntelligencePage() {
           workspaceId={session.workspaceId}
           suggestedQuestions={suggestedQuestions}
           yearsOfData={yearsOfData}
+          initialQuestion={q}
         />
       </div>
 
