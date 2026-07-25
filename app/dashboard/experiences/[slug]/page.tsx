@@ -10,6 +10,8 @@ import { SurveyTab } from "@/features/surveys/components/survey-tab";
 import { LearningImpactTab } from "@/features/surveys/components/learning-impact-tab";
 import { MaterialsTab } from "@/features/materials/components/materials-tab";
 import { getExperienceMaterials } from "@/features/materials/data";
+import { ExperienceAssetsTab } from "@/features/assets/components/experience-assets-tab";
+import { getAvailableAssets, getExperienceAssets } from "@/features/assets/data";
 import {
   getExperienceSurveyConfig,
   getExperienceSurveyTemplate,
@@ -113,6 +115,18 @@ export default async function ExperienceDetailPage({ params, searchParams }: Pro
             getExperienceMaterials(experience.id, "facilitator"),
           ]);
           return { workspaceId: session.workspaceId, participantMaterials, facilitatorMaterials };
+        })()
+      : null;
+
+  const assetsTabData =
+    activeTab === "assets"
+      ? await (async () => {
+          const session = await getSessionContext();
+          const [assignedAssets, availableAssets] = await Promise.all([
+            getExperienceAssets(experience.id),
+            getAvailableAssets(session.workspaceId, experience.id, experience.startDate, experience.endDate),
+          ]);
+          return { workspaceId: session.workspaceId, assignedAssets, availableAssets };
         })()
       : null;
 
@@ -289,6 +303,16 @@ export default async function ExperienceDetailPage({ params, searchParams }: Pro
             id: participant.id,
             fullName: `${participant.firstName} ${participant.lastName}`.trim(),
           }))}
+        />
+      )}
+
+      {activeTab === "assets" && assetsTabData && (
+        <ExperienceAssetsTab
+          experienceId={experience.id}
+          experienceSlug={experience.slug}
+          workspaceId={assetsTabData.workspaceId}
+          assignedAssets={assetsTabData.assignedAssets}
+          availableAssets={assetsTabData.availableAssets}
         />
       )}
     </div>

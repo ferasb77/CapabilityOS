@@ -6,6 +6,7 @@ import {
   Building2,
   GraduationCap,
   LayoutDashboard,
+  Package,
   Settings,
   SquareUserRound,
   Users,
@@ -25,6 +26,7 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   GraduationCap,
   Users,
   SquareUserRound,
+  Package,
   Settings,
 };
 

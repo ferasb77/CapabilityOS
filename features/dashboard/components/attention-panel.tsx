@@ -1,4 +1,4 @@
-import { AlertTriangle, Briefcase, CircleCheck, Mail, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Briefcase, CircleCheck, Mail, Package, ShieldAlert, type LucideIcon } from "lucide-react";
 
 import {
   Card,
@@ -15,6 +15,8 @@ const REASON_ICON: Record<AttentionItem["reason"], LucideIcon> = {
   survey_not_sent: Mail,
   survey_partially_sent: Mail,
   engagement_no_experiences: Briefcase,
+  low_stock: Package,
+  asset_conflict: ShieldAlert,
 };
 
 type Props = {

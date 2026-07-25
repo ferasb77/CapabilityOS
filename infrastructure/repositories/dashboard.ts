@@ -1,4 +1,6 @@
 import { createClient } from "@/infrastructure/supabase/server";
+import { getAssetConflicts, getLowStockAssets } from "@/features/assets/data";
+import { getSessionContext } from "@/infrastructure/session/session-context";
 
 export type ExperienceStatus = "draft" | "active" | "completed" | "cancelled";
 
@@ -39,7 +41,9 @@ export type AttentionReason =
   | "no_participants"
   | "survey_not_sent"
   | "survey_partially_sent"
-  | "engagement_no_experiences";
+  | "engagement_no_experiences"
+  | "asset_conflict"
+  | "low_stock";
 
 export type AttentionItem = {
   id: string;
@@ -99,26 +103,36 @@ const MS_PER_DAY = 86_400_000;
 
 export async function getDashboardData(): Promise<DashboardData> {
   const supabase = await createClient();
+  const session = await getSessionContext();
 
-  const [experiencesResult, participantsResult, surveyTokensResult, clientsResult, engagementsResult] =
-    await Promise.all([
-      supabase
-        .from("experiences")
-        .select(
-          "id, slug, title, venue, start_date, end_date, capacity, status, engagement_id, clients(name), engagements(title)"
-        )
-        .is("deleted_at", null)
-        .order("start_date", { ascending: false }),
-      supabase
-        .from("participants")
-        .select(
-          "id, workshop_slug, first_name, last_name, company, job_title, checked_in, created_at"
-        )
-        .order("created_at", { ascending: false }),
-      supabase.from("survey_tokens").select("workshop_id, participant_id").eq("survey_type", "satisfaction"),
-      supabase.from("clients").select("id", { count: "exact", head: true }).is("deleted_at", null),
-      supabase.from("engagements").select("id, title, status").is("deleted_at", null),
-    ]);
+  const [
+    experiencesResult,
+    participantsResult,
+    surveyTokensResult,
+    clientsResult,
+    engagementsResult,
+    lowStockAssets,
+    assetConflicts,
+  ] = await Promise.all([
+    supabase
+      .from("experiences")
+      .select(
+        "id, slug, title, venue, start_date, end_date, capacity, status, engagement_id, clients(name), engagements(title)"
+      )
+      .is("deleted_at", null)
+      .order("start_date", { ascending: false }),
+    supabase
+      .from("participants")
+      .select(
+        "id, workshop_slug, first_name, last_name, company, job_title, checked_in, created_at"
+      )
+      .order("created_at", { ascending: false }),
+    supabase.from("survey_tokens").select("workshop_id, participant_id").eq("survey_type", "satisfaction"),
+    supabase.from("clients").select("id", { count: "exact", head: true }).is("deleted_at", null),
+    supabase.from("engagements").select("id, title, status").is("deleted_at", null),
+    getLowStockAssets(session.workspaceId),
+    getAssetConflicts(session.workspaceId),
+  ]);
 
   if (experiencesResult.error) {
     throw new Error(experiencesResult.error.message);
@@ -271,6 +285,24 @@ export async function getDashboardData(): Promise<DashboardData> {
         detail: "No experiences linked to this engagement yet",
       });
     }
+  }
+
+  for (const asset of lowStockAssets) {
+    attentionItems.push({
+      id: asset.id,
+      title: asset.name,
+      reason: "low_stock",
+      detail: `${asset.name} is low — ${asset.stockQuantity} ${asset.stockUnit} remaining, reorder ${asset.reorderQuantity ?? asset.reorderThreshold}`,
+    });
+  }
+
+  for (const conflict of assetConflicts) {
+    attentionItems.push({
+      id: `${conflict.assetId}-${conflict.experienceAId}-${conflict.experienceBId}`,
+      title: conflict.assetName,
+      reason: "asset_conflict",
+      detail: `Assigned to both ${conflict.experienceATitle} and ${conflict.experienceBTitle} — resolve this conflict`,
+    });
   }
 
   const stats: DashboardStats = {
