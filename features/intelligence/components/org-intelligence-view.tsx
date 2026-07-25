@@ -3,13 +3,21 @@ import { Award, Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { OrganizationIntelligence, PeriodInfo } from "@/features/intelligence/data";
-import { generateOrgInsights } from "@/features/intelligence/insights";
-import { formatCurrency, formatPct, formatSatisfaction } from "@/features/intelligence/format";
+import { cn } from "@/lib/utils";
+import type { EfficiencyBenchmark, OperationalEfficiency, OrganizationIntelligence, PeriodInfo, SatisfactionIntelligence } from "@/features/intelligence/data";
+import { generateOperationalInsights, generateOrgInsights, generateSatisfactionInsights } from "@/features/intelligence/insights";
+import { formatCurrency, formatDateShort, formatPct, formatSatisfaction } from "@/features/intelligence/format";
 
 import { ColumnBarChart, HorizontalBarChart } from "./bar-chart";
 import { InsightGrid } from "./insight-card";
 import { MetricComparisonCard } from "./metric-comparison-card";
+
+const BENCHMARK_STYLES: Record<EfficiencyBenchmark, { label: string; className: string }> = {
+  good: { label: "Good", className: "text-gold" },
+  acceptable: { label: "Acceptable", className: "text-amber-500" },
+  needs_attention: { label: "Needs Attention", className: "text-destructive" },
+  no_data: { label: "No Data", className: "text-muted-foreground" },
+};
 
 function changeDirectionFromPct(pct: number | null): "up" | "down" | "flat" {
   if (pct === null || Math.abs(pct) < 0.5) return "flat";
@@ -33,8 +41,23 @@ function comparisonCaption(period: PeriodInfo): string {
   return `vs Full Year ${period.comparisonYear}`;
 }
 
-export function OrgIntelligenceView({ data }: { data: OrganizationIntelligence }) {
+type Props = {
+  data: OrganizationIntelligence;
+  satisfaction: SatisfactionIntelligence;
+  operations: OperationalEfficiency;
+};
+
+export function OrgIntelligenceView({ data, satisfaction, operations }: Props) {
   const insights = generateOrgInsights(data);
+  const satisfactionInsights = generateSatisfactionInsights(satisfaction);
+  const operationalInsights = generateOperationalInsights(operations);
+  const efficiencyMetrics = [
+    operations.surveyResponseRate,
+    operations.checkInRate,
+    operations.certificateIssuanceRate,
+    operations.materialsReadiness,
+    operations.logisticsCompletionRate,
+  ];
   const yearRows = [...data.yearlyTrend].sort((a, b) => b.year - a.year);
   const { period } = data;
   const periodHeaderLabel = period.isPartial ? period.currentPeriodLabel : String(data.currentYear);
@@ -242,6 +265,114 @@ export function OrgIntelligenceView({ data }: { data: OrganizationIntelligence }
               )}
             </p>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Satisfaction Intelligence */}
+      <Card className="bg-surface-elevated">
+        <CardHeader>
+          <CardTitle>Satisfaction Intelligence</CardTitle>
+          <CardDescription>How consistent results are, which dimension lags, and which experiences are worth reviewing.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div>
+              <p className="mb-3 text-sm font-medium text-ivory">Variance across experiences</p>
+              {satisfaction.varianceSampleSize > 0 ? (
+                <HorizontalBarChart
+                  rows={satisfaction.varianceDistribution.map((v) => ({
+                    label: v.label,
+                    value: v.count,
+                    pct: v.pct,
+                    colorClassName:
+                      v.label === "Highly Consistent" ? "bg-gold" : v.label === "Consistent" ? "bg-gold/60" : v.label === "Variable" ? "bg-amber-500" : "bg-destructive",
+                  }))}
+                  valueSuffix=" exp."
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">Not enough individual responses per experience to measure variance yet.</p>
+              )}
+            </div>
+            <div>
+              <p className="mb-3 text-sm font-medium text-ivory">Average by dimension</p>
+              <div className="grid grid-cols-2 gap-3">
+                {satisfaction.dimensionAverages.map((d) => (
+                  <div
+                    key={d.dimension}
+                    className={cn(
+                      "rounded-lg border bg-night/40 p-3",
+                      satisfaction.lowestDimension?.dimension === d.dimension ? "border-amber-500/40" : "border-border-subtle"
+                    )}
+                  >
+                    <p className="text-xs text-muted-foreground">{d.label}</p>
+                    <p className="mt-1 text-xl font-semibold text-ivory">{formatSatisfaction(d.avg)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {satisfaction.outliers.length > 0 && (
+            <div className="border-t border-border-subtle pt-4">
+              <p className="mb-3 text-sm font-medium text-ivory">Outliers worth reviewing</p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Experience</TableHead>
+                    <TableHead>Client</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Facilitator</TableHead>
+                    <TableHead className="text-right">Score</TableHead>
+                    <TableHead className="text-right">Δ vs Avg</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {satisfaction.outliers.slice(0, 8).map((o) => (
+                    <TableRow key={o.experienceId}>
+                      <TableCell className="text-ivory">{o.title}</TableCell>
+                      <TableCell className="text-muted-foreground">{o.clientName ?? "—"}</TableCell>
+                      <TableCell className="text-muted-foreground">{formatDateShort(o.startDate)}</TableCell>
+                      <TableCell className="text-muted-foreground">{o.facilitatorName ?? "—"}</TableCell>
+                      <TableCell className="text-right text-destructive">{o.avgSatisfaction}</TableCell>
+                      <TableCell className="text-right text-destructive">-{o.deltaFromPortfolioAvg}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {satisfactionInsights.length > 0 && (
+            <div className="border-t border-border-subtle pt-4">
+              <InsightGrid insights={satisfactionInsights} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Operations */}
+      <Card className="bg-surface-elevated">
+        <CardHeader>
+          <CardTitle>Operations</CardTitle>
+          <CardDescription>Key efficiency indicators, benchmarked at 80% good / 60% acceptable.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
+            {efficiencyMetrics.map((metric) => {
+              const style = BENCHMARK_STYLES[metric.benchmark];
+              return (
+                <div key={metric.key} className="rounded-lg border border-border-subtle bg-night/40 p-4">
+                  <p className="text-xs text-muted-foreground">{metric.label}</p>
+                  <p className={cn("mt-1 text-2xl font-semibold", style.className)}>{metric.pct !== null ? `${metric.pct}%` : "—"}</p>
+                  <p className={cn("mt-1 text-xs font-medium", style.className)}>{style.label}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {metric.numerator.toLocaleString()} / {metric.denominator.toLocaleString()}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+          {operationalInsights.length > 0 && <InsightGrid insights={operationalInsights} />}
         </CardContent>
       </Card>
 

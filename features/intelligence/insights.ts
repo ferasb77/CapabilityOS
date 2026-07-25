@@ -1,9 +1,14 @@
 import {
+  Activity,
   Award,
   Calendar,
+  ClipboardCheck,
   DollarSign,
+  Gauge,
+  Globe2,
   Landmark,
   Snowflake,
+  Sparkles,
   TrendingDown,
   TrendingUp,
   UserCheck,
@@ -16,7 +21,10 @@ import type {
   ClientDetailIntelligence,
   FacilitatorComparisonRow,
   FacilitatorDetailIntelligence,
+  OperationalEfficiency,
   OrganizationIntelligence,
+  PortfolioIntelligence,
+  SatisfactionIntelligence,
 } from "./data";
 
 // ---------------------------------------------------------------------------
@@ -257,21 +265,34 @@ export function generateClientInsights(client: ClientComparisonRow, data: Client
     });
   }
 
-  // No recent engagement.
+  // No recent activity — a dormant client with a strong historical track
+  // record (avg satisfaction >4.0) is framed as a re-engagement opportunity
+  // rather than a plain risk warning; a dormant client without that track
+  // record just gets the risk warning.
   if (data.lastActiveDate) {
     const monthsGap = (Date.now() - new Date(data.lastActiveDate).getTime()) / (1000 * 60 * 60 * 24 * 30.44);
-    if (monthsGap >= 12) {
+    const lastActiveLabel = new Date(data.lastActiveDate).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+    if (monthsGap >= 9 && data.overallAvgSatisfaction !== null && data.overallAvgSatisfaction > 4.0) {
+      insights.push({
+        icon: Sparkles,
+        headline: `Re-engagement opportunity: ${client.name} averaged ${data.overallAvgSatisfaction} satisfaction across ${client.totalExperiences} experiences`,
+        detail: `No activity recorded for ${Math.round(monthsGap)} months (last active ${lastActiveLabel}). Similar strong-performing clients historically returned within 9–12 months.`,
+        type: "positive",
+        metric: `${Math.round(monthsGap)}mo`,
+      });
+    } else if (monthsGap >= 12) {
       insights.push({
         icon: Calendar,
         headline: `No experience delivered for ${client.name} in over 12 months`,
-        detail: `Last activity was ${new Date(data.lastActiveDate).toLocaleDateString("en-US", { month: "long", year: "numeric" })}.`,
+        detail: `Last activity was ${lastActiveLabel}.`,
         type: "warning",
         metric: `${Math.round(monthsGap)}mo`,
       });
     }
   }
 
-  return insights.slice(0, 4);
+  return insights.slice(0, 5);
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +315,20 @@ export function generateFacilitatorInsights(facilitator: FacilitatorComparisonRo
         metric: `${shareOfClient}%`,
       });
     }
+  }
+
+  // Concentration risk by service line — distinct from the per-client
+  // concentration check above: this looks at what share of the WHOLE
+  // portfolio's delivery of one service line rests on this one facilitator.
+  const topServiceLine = [...data.serviceLineConcentration].sort((a, b) => b.sharePct - a.sharePct)[0];
+  if (topServiceLine && topServiceLine.sharePct > 35) {
+    insights.push({
+      icon: Gauge,
+      headline: `High concentration — ${facilitator.name} delivers ${topServiceLine.sharePct}% of ${topServiceLine.label.toLowerCase()} programs`,
+      detail: "Consider developing backup facilitators for this service line.",
+      type: "warning",
+      metric: `${topServiceLine.sharePct}%`,
+    });
   }
 
   // Consistently above portfolio average.
@@ -361,5 +396,214 @@ export function generateFacilitatorInsights(facilitator: FacilitatorComparisonRo
     }
   }
 
+  // Client affinity — a client this facilitator notably over-performs with,
+  // relative to their own overall average (requires at least 2 shared
+  // experiences to rule out a single lucky session).
+  if (data.benchmarking.facilitatorAvg !== null) {
+    const strongestPairing = [...data.clientPortfolio]
+      .filter((c) => c.experienceCount >= 2 && c.avgSatisfaction !== null)
+      .sort((a, b) => (b.avgSatisfaction as number) - (a.avgSatisfaction as number))[0];
+    if (strongestPairing) {
+      const affinityGap = round1((strongestPairing.avgSatisfaction as number) - data.benchmarking.facilitatorAvg);
+      if (affinityGap > 0.3) {
+        insights.push({
+          icon: Award,
+          headline: `${facilitator.name} consistently performs ${affinityGap} points above their average when working with ${strongestPairing.clientName}`,
+          detail: `${strongestPairing.avgSatisfaction} avg across ${strongestPairing.experienceCount} experiences with this client, vs ${data.benchmarking.facilitatorAvg} overall.`,
+          type: "positive",
+          metric: `+${affinityGap}`,
+        });
+      }
+    }
+  }
+
+  // Consistency — pairs the std-dev-based label with sample size, since a
+  // high average from very few experiences is weaker evidence than the same
+  // average from many.
+  if (data.consistency.stdDev !== null && data.consistency.label) {
+    if (data.consistency.sampleSize < 10) {
+      insights.push({
+        icon: Activity,
+        headline: `Only ${data.consistency.sampleSize} experiences with survey data on record for ${facilitator.name}`,
+        detail: "Their satisfaction average is directional, not yet strong evidence — more deliveries will sharpen the picture.",
+        type: "neutral",
+        metric: `n=${data.consistency.sampleSize}`,
+      });
+    } else if (data.consistency.label === "Highly Consistent" || data.consistency.label === "Consistent") {
+      insights.push({
+        icon: Gauge,
+        headline: `${facilitator.name} delivers reliably consistent results (${data.consistency.label.toLowerCase()}, std dev ${data.consistency.stdDev})`,
+        detail: `Based on ${data.consistency.sampleSize} experiences — a low-variance track record is stronger evidence than a high average from few deliveries.`,
+        type: "positive",
+        metric: `σ${data.consistency.stdDev}`,
+      });
+    } else {
+      insights.push({
+        icon: TrendingDown,
+        headline: `${facilitator.name}'s satisfaction scores vary noticeably session to session (${data.consistency.label.toLowerCase()}, std dev ${data.consistency.stdDev})`,
+        detail: `Based on ${data.consistency.sampleSize} experiences — worth understanding what drives the stronger and weaker sessions.`,
+        type: "warning",
+        metric: `σ${data.consistency.stdDev}`,
+      });
+    }
+  }
+
+  return insights.slice(0, 6);
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio insights
+// ---------------------------------------------------------------------------
+
+export function generatePortfolioInsights(data: PortfolioIntelligence): InsightCard[] {
+  const insights: InsightCard[] = [];
+
+  // Portfolio shift detection — any service line that moved >10 percentage
+  // points between the earlier and later half of the years on record.
+  const biggestShift = [...data.serviceLineShifts].sort((a, b) => Math.abs(b.deltaPp) - Math.abs(a.deltaPp))[0];
+  if (biggestShift && Math.abs(biggestShift.deltaPp) > 10) {
+    const direction = biggestShift.deltaPp > 0 ? "growing" : "declining";
+    insights.push({
+      icon: biggestShift.deltaPp > 0 ? TrendingUp : TrendingDown,
+      headline: `${biggestShift.label} represented ${biggestShift.earlyPct}% of delivery in earlier years but ${biggestShift.latePct}% in recent years — ${direction} service line`,
+      detail: `A shift of ${Math.abs(biggestShift.deltaPp)} percentage points across the period on record.`,
+      type: biggestShift.deltaPp > 0 ? "positive" : "neutral",
+      metric: `${biggestShift.deltaPp > 0 ? "+" : ""}${biggestShift.deltaPp}pp`,
+    });
+  }
+
+  // Topic concentration — titles containing "Leadership" as the example
+  // theme cluster called out in the brief.
+  const leadershipTitles = data.topTitles.filter((t) => t.title.toLowerCase().includes("leadership"));
+  if (leadershipTitles.length > 0 && data.totalExperiences > 0 && data.portfolioAvgSatisfaction !== null) {
+    const count = leadershipTitles.reduce((sum, t) => sum + t.count, 0);
+    const pct = round1((count / data.totalExperiences) * 100);
+    const withSatisfaction = leadershipTitles.filter((t) => t.avgSatisfaction !== null);
+    const avg =
+      withSatisfaction.length > 0
+        ? round1(withSatisfaction.reduce((sum, t) => sum + (t.avgSatisfaction as number) * t.count, 0) / withSatisfaction.reduce((sum, t) => sum + t.count, 0))
+        : null;
+    if (pct > 5 && avg !== null) {
+      const gap = round1(avg - data.portfolioAvgSatisfaction);
+      insights.push({
+        icon: Award,
+        headline: `Leadership programs represent ${pct}% of all delivery${gap > 0 ? ` and outperform the portfolio average by ${gap} points` : ""}`,
+        detail: `${avg} avg satisfaction across ${count} experiences, vs ${data.portfolioAvgSatisfaction} portfolio-wide.`,
+        type: gap > 0 ? "positive" : "neutral",
+        metric: `${pct}%`,
+      });
+    }
+  }
+
+  // Geographic shift.
+  if (data.geographyThisYearTop && data.geographyLastYearTop && data.geographyThisYearTop !== data.geographyLastYearTop) {
+    insights.push({
+      icon: Globe2,
+      headline: `Most-active market shifted from ${data.geographyLastYearTop} to ${data.geographyThisYearTop}`,
+      detail: "Worth checking whether this reflects a deliberate regional push or a one-off client mix.",
+      type: "neutral",
+      metric: data.geographyThisYearTop,
+    });
+  }
+
+  // Government vs. corporate satisfaction gap.
+  const corporate = data.sectorMix.find((s) => s.type === "corporate");
+  const government = data.sectorMix.find((s) => s.type === "government");
+  if (corporate?.avgSatisfaction !== null && corporate?.avgSatisfaction !== undefined && government?.avgSatisfaction !== null && government?.avgSatisfaction !== undefined) {
+    const gap = round1(corporate.avgSatisfaction - government.avgSatisfaction);
+    if (gap > 0.3) {
+      insights.push({
+        icon: Landmark,
+        headline: `Government sector satisfaction (${government.avgSatisfaction}) is significantly below corporate (${corporate.avgSatisfaction})`,
+        detail: `A ${gap}-point gap across ${government.count} government experiences on record.`,
+        type: "warning",
+        metric: `-${gap}`,
+      });
+    }
+  }
+
+  // Revenue concentration.
+  if (data.revenueByClient.length >= 2 && data.revenueConcentrationTop2Pct !== null) {
+    insights.push({
+      icon: DollarSign,
+      headline: `Top 2 clients represent ${data.revenueConcentrationTop2Pct}% of total contract value`,
+      detail: `${data.revenueByClient[0].clientName} and ${data.revenueByClient[1].clientName} are the largest contracts on record.`,
+      type: data.revenueConcentrationTop2Pct > 50 ? "warning" : "neutral",
+      metric: `${data.revenueConcentrationTop2Pct}%`,
+    });
+  }
+
+  return insights.slice(0, 6);
+}
+
+// ---------------------------------------------------------------------------
+// Satisfaction Intelligence insights
+// ---------------------------------------------------------------------------
+
+export function generateSatisfactionInsights(data: SatisfactionIntelligence): InsightCard[] {
+  const insights: InsightCard[] = [];
+
+  const highlyConsistent = data.varianceDistribution.find((v) => v.label === "Highly Consistent");
+  if (highlyConsistent && data.varianceSampleSize > 0) {
+    insights.push({
+      icon: Gauge,
+      headline: `${highlyConsistent.pct}% of experiences deliver consistent results (std dev <0.5)`,
+      detail: `Based on ${data.varianceSampleSize} experiences with enough individual responses to measure agreement.`,
+      type: highlyConsistent.pct >= 60 ? "positive" : "neutral",
+      metric: `${highlyConsistent.pct}%`,
+    });
+  }
+
+  if (data.lowestDimension) {
+    const isLogistics = data.lowestDimension.dimension === "logistics";
+    insights.push({
+      icon: ClipboardCheck,
+      headline: `${data.lowestDimension.label} consistently scores ${data.lowestDimension.gapFromHighest} points below the highest-rated dimension`,
+      detail: isLogistics
+        ? "Operational preparation may need attention — venue, materials, and scheduling logistics."
+        : `${data.lowestDimension.label} is the portfolio's weakest dimension at ${data.lowestDimension.avg} avg.`,
+      type: "warning",
+      metric: `-${data.lowestDimension.gapFromHighest}`,
+    });
+  }
+
+  if (data.outliers.length > 0) {
+    insights.push({
+      icon: TrendingDown,
+      headline: `${data.outliers.length} experience${data.outliers.length === 1 ? "" : "s"} scored more than 1 point below the portfolio average`,
+      detail: `Worth reviewing individually — starting with ${data.outliers[0].title} (${data.outliers[0].avgSatisfaction} avg, ${data.outliers[0].deltaFromPortfolioAvg} below average).`,
+      type: "warning",
+      metric: `${data.outliers.length}`,
+    });
+  }
+
   return insights.slice(0, 4);
+}
+
+// ---------------------------------------------------------------------------
+// Operational Efficiency insights
+// ---------------------------------------------------------------------------
+
+const EFFICIENCY_SUGGESTIONS: Record<string, string> = {
+  survey_response_rate: "Consider sending reminder emails earlier.",
+  check_in_rate: "Consider confirming attendance closer to the event date.",
+  certificate_issuance_rate: "Consider automating certificate issuance on completion.",
+  materials_readiness: "Consider setting a materials-ready deadline ahead of each delivery.",
+  logistics_completion_rate: "Consider assigning logistics owners with earlier due dates.",
+};
+
+export function generateOperationalInsights(data: OperationalEfficiency): InsightCard[] {
+  const metrics = [data.surveyResponseRate, data.checkInRate, data.certificateIssuanceRate, data.materialsReadiness, data.logisticsCompletionRate];
+
+  return metrics
+    .filter((m) => m.pct !== null && m.benchmark === "needs_attention")
+    .sort((a, b) => (a.pct as number) - (b.pct as number))
+    .map((m) => ({
+      icon: Gauge,
+      headline: `${m.label} is ${m.pct}% — ${round1(80 - (m.pct as number))} points below the 80% benchmark`,
+      detail: EFFICIENCY_SUGGESTIONS[m.key] ?? "Worth investigating the cause.",
+      type: "warning" as const,
+      metric: `${m.pct}%`,
+    }))
+    .slice(0, 5);
 }

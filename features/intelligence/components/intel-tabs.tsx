@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 const INTEL_TABS = [
   { key: "overview", label: "Overview", href: "/dashboard/intelligence" },
   { key: "clients", label: "Clients", href: "/dashboard/intelligence/clients" },
+  { key: "portfolio", label: "Portfolio", href: "/dashboard/intelligence/portfolio" },
   { key: "facilitators", label: "Facilitators", href: "/dashboard/intelligence/facilitators" },
 ] as const;
 

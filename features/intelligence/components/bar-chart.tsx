@@ -18,9 +18,10 @@ type HorizontalBarRow = {
 type HorizontalBarChartProps = {
   rows: HorizontalBarRow[];
   valueSuffix?: string;
+  formatValue?: (value: number) => string;
 };
 
-export function HorizontalBarChart({ rows, valueSuffix = "" }: HorizontalBarChartProps) {
+export function HorizontalBarChart({ rows, valueSuffix = "", formatValue }: HorizontalBarChartProps) {
   const maxPct = Math.max(...rows.map((r) => r.pct), 1);
 
   return (
@@ -30,7 +31,7 @@ export function HorizontalBarChart({ rows, valueSuffix = "" }: HorizontalBarChar
           <div className="flex items-center justify-between text-sm">
             <span className="text-ivory">{row.label}</span>
             <span className="text-muted-foreground">
-              {row.value.toLocaleString()}
+              {formatValue ? formatValue(row.value) : row.value.toLocaleString()}
               {valueSuffix} · {row.pct}%
             </span>
           </div>

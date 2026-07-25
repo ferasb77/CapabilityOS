@@ -191,6 +191,12 @@ Request → Auth middleware → Resolve organization + workspace → RLS enforce
 
 ---
 
+## Intelligence Layer Rules
+
+**Period comparison integrity:** Never compare a partial year against a full year without explicitly identifying the difference. When the current year is in progress, all year-over-year comparisons must use the equivalent elapsed period from the comparison year (e.g. Jan 1–Jul 25, 2026 vs Jan 1–Jul 25, 2024). Every comparison metric must show the period being compared. This rule applies to every intelligence query, insight, dashboard card, and trend indicator in the platform.
+
+---
+
 ## Before writing any code — checklist
 
 - [ ] Does this belong in a feature folder or shared infrastructure?

@@ -1,18 +1,21 @@
+import { Minus, TrendingDown, TrendingUp } from "lucide-react";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { ClientComparisonRow, ClientDetailIntelligence } from "@/features/intelligence/data";
+import { cn } from "@/lib/utils";
+import type { ClientComparisonRow, ClientDetailIntelligence, HealthSignalStatus } from "@/features/intelligence/data";
 import { generateClientInsights } from "@/features/intelligence/insights";
-import { formatCurrency, formatDateMonthYear, formatSatisfaction } from "@/features/intelligence/format";
+import { formatDateMonthYear, formatDateShort, formatCurrency, formatSatisfaction } from "@/features/intelligence/format";
 
 import { ColumnBarChart, HorizontalBarChart } from "./bar-chart";
 import { InsightGrid } from "./insight-card";
 import { RelationshipRiskBadge } from "./relationship-risk-badge";
 
-const RISK_EXPLANATION: Record<ClientDetailIntelligence["relationshipRisk"], string> = {
-  healthy: "Satisfaction is stable or improving and this client has been active within the last 6 months.",
-  monitor: "Satisfaction is declining, or there has been no engagement in 6–12 months.",
-  at_risk: "Satisfaction is declining significantly, or there has been no engagement in 12+ months.",
+const SIGNAL_STYLES: Record<HealthSignalStatus, { icon: typeof TrendingUp; className: string }> = {
+  positive: { icon: TrendingUp, className: "text-gold" },
+  neutral: { icon: Minus, className: "text-muted-foreground" },
+  negative: { icon: TrendingDown, className: "text-destructive" },
 };
 
 export function ClientDetailPanel({ row, data }: { row: ClientComparisonRow; data: ClientDetailIntelligence }) {
@@ -199,6 +202,56 @@ export function ClientDetailPanel({ row, data }: { row: ClientComparisonRow; dat
         </CardContent>
       </Card>
 
+      {/* Client Lifecycle */}
+      <Card className="bg-surface-elevated">
+        <CardHeader>
+          <CardTitle>Client Lifecycle</CardTitle>
+          <CardDescription>How long this relationship has run, and how it has evolved.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <div>
+              <p className="text-xs text-muted-foreground">First activity</p>
+              <p className="mt-1 text-sm font-medium text-ivory">{formatDateShort(data.lifecycle.firstActivityDate)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Most recent activity</p>
+              <p className="mt-1 text-sm font-medium text-ivory">{formatDateShort(data.lifecycle.mostRecentActivityDate)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Relationship duration</p>
+              <p className="mt-1 text-sm font-medium text-ivory">
+                {data.lifecycle.relationshipDurationYears !== null ? `${data.lifecycle.relationshipDurationYears} years` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Avg interval between deliveries</p>
+              <p className="mt-1 text-sm font-medium text-ivory">
+                {data.lifecycle.avgIntervalMonths !== null ? `${data.lifecycle.avgIntervalMonths} months` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Longest gap</p>
+              <p className="mt-1 text-sm font-medium text-ivory">
+                {data.lifecycle.longestGapMonths !== null ? `${data.lifecycle.longestGapMonths} months` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Repeat engagement rate</p>
+              <p className="mt-1 text-sm font-medium text-ivory">
+                {data.lifecycle.repeatEngagementRatePct !== null ? `${data.lifecycle.repeatEngagementRatePct}%` : "—"}
+              </p>
+            </div>
+          </div>
+          {data.lifecycle.expansionSignal && (
+            <p className="mt-4 rounded-lg border border-gold/20 bg-night/40 p-3 text-sm text-ivory">
+              Expansion signal: the service mix has broadened over time — this client now buys a wider range of experience types
+              than they started with.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       {/* F. Client-Specific Insights */}
       <Card className="bg-surface-elevated">
         <CardHeader>
@@ -209,16 +262,32 @@ export function ClientDetailPanel({ row, data }: { row: ClientComparisonRow; dat
         </CardContent>
       </Card>
 
-      {/* G. Relationship Risk Signal */}
+      {/* G. Relationship Risk Signal — composite of four independent signals */}
       <Card className="bg-surface-elevated">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            Relationship Risk
-            <RelationshipRiskBadge risk={data.relationshipRisk} />
+            Relationship Health
+            <RelationshipRiskBadge risk={data.health.risk} />
           </CardTitle>
+          <CardDescription>Computed from four independent signals, combined into a composite score.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-1">
-          <p className="text-sm text-ivory">{RISK_EXPLANATION[data.relationshipRisk]}</p>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {data.health.signals.map((signal) => {
+              const style = SIGNAL_STYLES[signal.status];
+              const Icon = style.icon;
+              return (
+                <div key={signal.label} className="flex items-start gap-2.5 rounded-lg border border-border-subtle bg-night/40 p-3">
+                  <Icon className={cn("mt-0.5 size-4 shrink-0", style.className)} />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ivory">{signal.label}</p>
+                    <p className="text-xs text-muted-foreground">{signal.detail}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="rounded-lg border border-gold/20 bg-night/40 p-3 text-sm text-ivory">{data.health.reasoning}</p>
           <p className="text-xs text-muted-foreground">
             Last active: {formatDateMonthYear(data.lastActiveDate)}
             {data.recentTrendDelta !== null &&

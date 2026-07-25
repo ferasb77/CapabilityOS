@@ -1,11 +1,15 @@
 import { IntelTabs } from "@/features/intelligence/components/intel-tabs";
 import { OrgIntelligenceView } from "@/features/intelligence/components/org-intelligence-view";
-import { getOrganizationIntelligence } from "@/features/intelligence/data";
+import { getOperationalEfficiency, getOrganizationIntelligence, getSatisfactionIntelligence } from "@/features/intelligence/data";
 import { getSessionContext } from "@/infrastructure/session/session-context";
 
 export default async function OrganizationIntelligencePage() {
   const session = await getSessionContext();
-  const data = await getOrganizationIntelligence(session.workspaceId);
+  const [data, satisfaction, operations] = await Promise.all([
+    getOrganizationIntelligence(session.workspaceId),
+    getSatisfactionIntelligence(session.workspaceId),
+    getOperationalEfficiency(session.workspaceId),
+  ]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -18,7 +22,7 @@ export default async function OrganizationIntelligencePage() {
 
       <IntelTabs activeTab="overview" />
 
-      <OrgIntelligenceView data={data} />
+      <OrgIntelligenceView data={data} satisfaction={satisfaction} operations={operations} />
     </div>
   );
 }
