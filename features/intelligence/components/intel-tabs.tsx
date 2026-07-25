@@ -7,6 +7,7 @@ const INTEL_TABS = [
   { key: "clients", label: "Clients", href: "/dashboard/intelligence/clients" },
   { key: "portfolio", label: "Portfolio", href: "/dashboard/intelligence/portfolio" },
   { key: "facilitators", label: "Facilitators", href: "/dashboard/intelligence/facilitators" },
+  { key: "ask", label: "Ask CapabilityOS", href: "/dashboard/intelligence/ask" },
 ] as const;
 
 export type IntelTabKey = (typeof INTEL_TABS)[number]["key"];

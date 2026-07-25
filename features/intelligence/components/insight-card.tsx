@@ -6,6 +6,8 @@ const TYPE_STYLES: Record<InsightCardData["type"], { icon: string; accent: strin
   positive: { icon: "text-gold", accent: "border-gold/25" },
   warning: { icon: "text-amber-500", accent: "border-amber-500/25" },
   neutral: { icon: "text-muted-foreground", accent: "border-border-subtle" },
+  opportunity: { icon: "text-teal-400", accent: "border-teal-400/25" },
+  question: { icon: "text-sky-400", accent: "border-sky-400/25" },
 };
 
 export function InsightCardView({ insight }: { insight: InsightCardData }) {

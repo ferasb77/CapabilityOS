@@ -18,6 +18,7 @@ import {
   generateClientInsights,
   generateFacilitatorInsights,
   generateOperationalInsights,
+  generateOpportunityInsights,
   generateOrgInsights,
   generatePortfolioInsights,
   generateSatisfactionInsights,
@@ -41,6 +42,10 @@ export type AssistantOrganizationSummary = {
   totalRevenue: number;
   yearsOfData: number;
   portfolioAvgSatisfaction: number | null;
+  /** Clients on record with zero delivery history — not yet active, and
+   * therefore excluded from `clients` and from any risk/concern analysis.
+   * See CLAUDE.md's Intelligence Assistant Rule. */
+  inactiveClients: number;
 };
 
 export type AssistantYearlyTrend = {
@@ -165,7 +170,7 @@ function toAssistantInsights(cards: InsightCard[]): AssistantInsight[] {
  * about" far more often than "what's going well," so the most-likely-useful
  * insights should survive if the context ever needs trimming. */
 function prioritizeInsights(insights: AssistantInsight[]): AssistantInsight[] {
-  const weight: Record<InsightType, number> = { warning: 0, neutral: 1, positive: 2 };
+  const weight: Record<InsightType, number> = { warning: 0, opportunity: 1, question: 1, neutral: 2, positive: 3 };
   return [...insights].sort((a, b) => weight[a.type] - weight[b.type]);
 }
 
@@ -232,11 +237,17 @@ export async function buildAssistantContext(workspaceId: string): Promise<Assist
   const clientDetailById = new Map(clientDetails.map((d, i) => [clientRows[i].id, d]));
   const facilitatorDetailById = new Map(facilitatorDetails.map((d, i) => [facilitatorRows[i].id, d]));
 
-  const clients = clientRows.map((row) => buildClientSummary(row, clientDetailById.get(row.id) ?? null));
+  // Clients with zero delivery history are not yet active — they cannot be
+  // assessed for health and must not appear in risk/concern analyses. See
+  // CLAUDE.md's Intelligence Assistant Rule.
+  const activeClientRows = clientRows.filter((row) => row.totalExperiences > 0);
+  const inactiveClientCount = clientRows.length - activeClientRows.length;
+
+  const clients = activeClientRows.map((row) => buildClientSummary(row, clientDetailById.get(row.id) ?? null));
   const facilitators = facilitatorRows.map((row) => buildFacilitatorSummary(row, facilitatorDetailById.get(row.id) ?? null));
 
   const entityInsights: InsightCard[] = [];
-  for (const row of clientRows) {
+  for (const row of activeClientRows) {
     const detail = clientDetailById.get(row.id);
     if (detail) entityInsights.push(...generateClientInsights(row, detail));
   }
@@ -245,11 +256,18 @@ export async function buildAssistantContext(workspaceId: string): Promise<Assist
     if (detail) entityInsights.push(...generateFacilitatorInsights(row, detail));
   }
 
+  const clientsWithDetail: { row: ClientComparisonRow; detail: ClientDetailIntelligence }[] = [];
+  for (const row of activeClientRows) {
+    const detail = clientDetailById.get(row.id);
+    if (detail) clientsWithDetail.push({ row, detail });
+  }
+
   const allInsights = toAssistantInsights([
     ...generateOrgInsights(org),
     ...generatePortfolioInsights(portfolio),
     ...generateSatisfactionInsights(satisfaction),
     ...generateOperationalInsights(operations),
+    ...generateOpportunityInsights(clientsWithDetail),
     ...entityInsights,
   ]);
 
@@ -273,6 +291,7 @@ export async function buildAssistantContext(workspaceId: string): Promise<Assist
       totalRevenue: portfolio.totalRevenue,
       yearsOfData: years.length,
       portfolioAvgSatisfaction: satisfaction.portfolioAvgSatisfaction,
+      inactiveClients: inactiveClientCount,
     },
     yearlyTrends: org.yearlyTrend.map((y) => ({
       year: y.year,

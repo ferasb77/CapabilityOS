@@ -35,7 +35,7 @@ import type {
 // and the Decision.
 // ---------------------------------------------------------------------------
 
-export type InsightType = "positive" | "warning" | "neutral";
+export type InsightType = "positive" | "warning" | "neutral" | "opportunity" | "question";
 
 export type InsightCard = {
   icon: LucideIcon;
@@ -209,6 +209,48 @@ export function generateClientInsights(client: ClientComparisonRow, data: Client
     }
   }
 
+  // Sustained satisfaction improvement — 3+ consecutive full years with no
+  // year-over-year decline, framed as relationship strength rather than a
+  // one-off uptick.
+  if (fullYears.length >= 3) {
+    let consecutiveImproving = 1;
+    for (let i = fullYears.length - 1; i > 0; i--) {
+      if ((fullYears[i].avgSatisfaction as number) > (fullYears[i - 1].avgSatisfaction as number)) {
+        consecutiveImproving++;
+      } else {
+        break;
+      }
+    }
+    if (consecutiveImproving >= 3) {
+      const start = fullYears[fullYears.length - consecutiveImproving];
+      const end = fullYears[fullYears.length - 1];
+      const delta = round1((end.avgSatisfaction as number) - (start.avgSatisfaction as number));
+      insights.push({
+        icon: TrendingUp,
+        headline: `Relationship strength: ${client.name} satisfaction has improved ${delta} points over ${consecutiveImproving} years — strong foundation for expanded engagement`,
+        detail: `Rose from ${start.avgSatisfaction} in ${start.year} to ${end.avgSatisfaction} in ${end.year}, with no year-over-year decline in between.`,
+        type: "opportunity",
+        metric: `+${delta}`,
+      });
+    }
+  }
+
+  // Client maturity — the relationship has expanded past a single service
+  // type over a multi-year span.
+  if (data.lifecycle.expansionSignal && data.lifecycle.relationshipDurationYears !== null && data.lifecycle.relationshipDurationYears >= 3) {
+    const earlyTypes = data.typeDistributionEarly.filter((t) => t.count > 0).length;
+    const lateTypes = data.typeDistributionLate.filter((t) => t.count > 0).length;
+    if (lateTypes > earlyTypes) {
+      insights.push({
+        icon: TrendingUp,
+        headline: `Client maturity: ${client.name} has evolved from single-service to multi-service engagement over ${Math.round(data.lifecycle.relationshipDurationYears)} years`,
+        detail: `Now spans ${lateTypes} service type${lateTypes === 1 ? "" : "s"}, up from ${earlyTypes} earlier in the relationship.`,
+        type: "opportunity",
+        metric: `${lateTypes} services`,
+      });
+    }
+  }
+
   // Coaching vs. workshop opportunity.
   if (
     data.coachingAvgSatisfaction !== null &&
@@ -220,7 +262,7 @@ export function generateClientInsights(client: ClientComparisonRow, data: Client
       icon: TrendingUp,
       headline: `${client.name} coaching programs (${data.coachingAvgSatisfaction} avg) outperform their workshops (${data.workshopAvgSatisfaction} avg) by ${gap} points`,
       detail: "An opportunity to propose more coaching engagements to this client.",
-      type: "positive",
+      type: "opportunity",
       metric: `+${gap}`,
     });
   }
@@ -278,7 +320,7 @@ export function generateClientInsights(client: ClientComparisonRow, data: Client
         icon: Sparkles,
         headline: `Re-engagement opportunity: ${client.name} averaged ${data.overallAvgSatisfaction} satisfaction across ${client.totalExperiences} experiences`,
         detail: `No activity recorded for ${Math.round(monthsGap)} months (last active ${lastActiveLabel}). Similar strong-performing clients historically returned within 9–12 months.`,
-        type: "positive",
+        type: "opportunity",
         metric: `${Math.round(monthsGap)}mo`,
       });
     } else if (monthsGap >= 12) {
@@ -292,7 +334,49 @@ export function generateClientInsights(client: ClientComparisonRow, data: Client
     }
   }
 
-  return insights.slice(0, 5);
+  return insights.slice(0, 7);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-client opportunity insights — unlike generateClientInsights (which
+// only ever looks at one client's own history), this compares clients
+// against each other, so it needs the full client roster + detail up front
+// rather than being called once per client.
+// ---------------------------------------------------------------------------
+
+export function generateOpportunityInsights(
+  clients: { row: ClientComparisonRow; detail: ClientDetailIntelligence }[]
+): InsightCard[] {
+  const insights: InsightCard[] = [];
+
+  // Service expansion — a client whose coaching programs meaningfully
+  // outperform their own workshops, matched against another active client
+  // that has never been sold coaching at all.
+  const coachingCandidates = clients
+    .filter(
+      ({ detail }) =>
+        detail.coachingAvgSatisfaction !== null && detail.workshopAvgSatisfaction !== null && detail.coachingAvgSatisfaction - detail.workshopAvgSatisfaction > 0.3
+    )
+    .sort((a, b) => (b.detail.coachingAvgSatisfaction as number) - (b.detail.workshopAvgSatisfaction as number) - ((a.detail.coachingAvgSatisfaction as number) - (a.detail.workshopAvgSatisfaction as number)));
+
+  for (const strong of coachingCandidates) {
+    const noCoachingClient = clients.find(
+      ({ row, detail }) => row.id !== strong.row.id && row.totalExperiences > 0 && !detail.typeDistribution.some((t) => t.type === "coaching" && t.count > 0)
+    );
+    if (noCoachingClient) {
+      const gap = round1((strong.detail.coachingAvgSatisfaction as number) - (strong.detail.workshopAvgSatisfaction as number));
+      insights.push({
+        icon: Sparkles,
+        headline: `Service expansion opportunity: ${strong.row.name} coaching programs outperform workshops by ${gap} points but coaching has not been proposed to ${noCoachingClient.row.name}`,
+        detail: `${strong.row.name} averages ${strong.detail.coachingAvgSatisfaction} on coaching vs ${strong.detail.workshopAvgSatisfaction} on workshops. ${noCoachingClient.row.name} has ${noCoachingClient.row.totalExperiences} experiences on record, none of them coaching.`,
+        type: "opportunity",
+        metric: `+${gap}`,
+      });
+      break;
+    }
+  }
+
+  return insights;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +436,24 @@ export function generateFacilitatorInsights(facilitator: FacilitatorComparisonRo
         detail: "Worth reviewing recent delivery feedback with this facilitator.",
         type: "warning",
         metric: `${gap}`,
+      });
+    }
+  }
+
+  // Consistently above portfolio average across every client served — a
+  // stronger, broader signal than the single facilitatorAvg-vs-portfolioAvg
+  // gap above, since it requires every individual client relationship to
+  // clear the bar, not just the blended average.
+  if (data.benchmarking.portfolioAvg !== null) {
+    const ratedClients = data.clientPortfolio.filter((c) => c.avgSatisfaction !== null);
+    const allAboveAvg = ratedClients.length >= 2 && ratedClients.every((c) => (c.avgSatisfaction as number) > (data.benchmarking.portfolioAvg as number));
+    if (allAboveAvg) {
+      insights.push({
+        icon: Award,
+        headline: `Facilitator strength: ${facilitator.name} delivers above portfolio average across all ${ratedClients.length} clients served — consider expanding their utilization`,
+        detail: `Every client this facilitator has worked with rates them above the ${data.benchmarking.portfolioAvg} portfolio average.`,
+        type: "opportunity",
+        metric: `${ratedClients.length} clients`,
       });
     }
   }
@@ -448,7 +550,7 @@ export function generateFacilitatorInsights(facilitator: FacilitatorComparisonRo
     }
   }
 
-  return insights.slice(0, 6);
+  return insights.slice(0, 7);
 }
 
 // ---------------------------------------------------------------------------

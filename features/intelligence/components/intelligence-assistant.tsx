@@ -45,7 +45,10 @@ function splitFollowUps(answer: string): { body: string; followUps: string[] } {
  * (headline, supporting numbers, caveats) without pulling in a markdown
  * dependency for a handful of tags. */
 function FormattedAnswer({ text }: { text: string }) {
-  const lines = text.split("\n").filter((l) => l.trim() !== "");
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !/^[-*_\s]+$/.test(l));
 
   function renderInline(line: string) {
     const parts = line.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
@@ -154,17 +157,21 @@ export function IntelligenceAssistant({ workspaceId, suggestedQuestions, yearsOf
   const hasConversation = messages.length > 0;
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       {!hasConversation && (
-        <div className="flex flex-wrap gap-2">
-          {suggestedQuestions.map((q) => (
-            <QuestionChip key={q} label={q} onClick={() => submitQuestion(q)} disabled={isPending} />
-          ))}
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
+          <Sparkles className="size-6 text-gold" />
+          <p className="max-w-md text-sm text-muted-foreground">Ask a question to get started, or try one of these:</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {suggestedQuestions.map((q) => (
+              <QuestionChip key={q} label={q} onClick={() => submitQuestion(q)} disabled={isPending} />
+            ))}
+          </div>
         </div>
       )}
 
       {hasConversation && (
-        <div ref={scrollRef} className="max-h-[28rem] space-y-4 overflow-y-auto rounded-lg border border-border-subtle bg-night/30 p-4">
+        <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto rounded-lg border border-border-subtle bg-night/30 p-4">
           {visibleMessages.map((m) => {
             if (m.role === "user") {
               return (
@@ -232,13 +239,6 @@ export function IntelligenceAssistant({ workspaceId, suggestedQuestions, yearsOf
         <button type="button" onClick={handleClear} className="text-xs text-muted-foreground underline underline-offset-2 hover:text-ivory">
           Clear conversation
         </button>
-      )}
-
-      {!hasConversation && (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Sparkles className="size-3 text-gold" />
-          Answers are grounded in your operational data — the assistant will say so when it&apos;s inferring rather than citing a fact.
-        </p>
       )}
     </div>
   );
