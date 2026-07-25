@@ -45,13 +45,17 @@ export function FacilitatorDetailPanel({ row, data }: { row: FacilitatorComparis
             ) : (
               <>
                 <ColumnBarChart
-                  entries={data.yearlyTrend.map((y) => ({ label: String(y.year), value: y.avgSatisfaction ?? 0 }))}
+                  entries={data.yearlyTrend.map((y) => ({
+                    label: y.isPartialCurrentYear ? `${y.year} (YTD)` : String(y.year),
+                    value: y.avgSatisfaction ?? 0,
+                  }))}
                   formatValue={(v) => (v > 0 ? v.toFixed(1) : "—")}
                 />
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   {data.yearlyTrend.map((y) => (
                     <span key={y.year}>
-                      {y.year}: {y.experiences} experiences
+                      {y.year}
+                      {y.isPartialCurrentYear ? " (YTD)" : ""}: {y.experiences} experiences
                     </span>
                   ))}
                 </div>

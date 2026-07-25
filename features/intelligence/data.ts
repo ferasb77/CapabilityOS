@@ -25,13 +25,51 @@ function bucketExperienceType(raw: string): ExperienceTypeBucket {
 export type YearMetrics = {
   year: number;
   isCurrent: boolean;
+  /** True when `year` is the real current calendar year — i.e. still in
+   * progress, so its totals are inherently a year-to-date snapshot, not a
+   * full year. */
+  isPartial: boolean;
   experiences: number;
   participants: number;
   avgSatisfaction: number | null;
   revenue: number;
+  /** All three "vs prior" figures below compare like-for-like periods: a
+   * partial year is compared against the SAME Jan 1 – [today] window in the
+   * comparison year, never against that year's full 12 months. */
   experiencesChangePct: number | null;
   participantsChangePct: number | null;
   satisfactionDelta: number | null;
+  /** The year this row was compared against (null for the earliest year on
+   * record, which has nothing to compare to). */
+  comparisonYear: number | null;
+  /** Non-null only when the comparison used a truncated, period-matched
+   * window rather than the comparison year's full 12 months — e.g.
+   * "Jan 1 – Jul 25, 2024". Render this next to the % change so it's never
+   * implied to be a full-year comparison. */
+  comparisonPeriodLabel: string | null;
+  /** True when `comparisonYear` isn't literally `year - 1` — e.g. 2025 has
+   * no data at all, so 2026 falls back to comparing against 2024. */
+  comparisonIsFallbackYear: boolean;
+  /** Raw comparison-period totals, for UI that wants to show both sides of
+   * the comparison explicitly (e.g. "8 vs 11 in the same period last year"). */
+  comparisonExperiences: number | null;
+  comparisonParticipants: number | null;
+  comparisonAvgSatisfaction: number | null;
+};
+
+export type PeriodInfo = {
+  /** True when the dataset's current year is the real current calendar
+   * year — still in progress — and every "this year" figure in this module
+   * is therefore a year-to-date snapshot rather than a full year. */
+  isPartial: boolean;
+  currentYear: number;
+  /** "Jan 1 – Jul 25, 2026" when partial; "Full Year 2026" otherwise. */
+  currentPeriodLabel: string;
+  comparisonYear: number | null;
+  /** Non-null only when `isPartial` — the same year-to-date window applied
+   * to the comparison year, e.g. "Jan 1 – Jul 25, 2024". */
+  comparisonPeriodLabel: string | null;
+  comparisonIsFallbackYear: boolean;
 };
 
 export type TypeMixEntry = { type: ExperienceTypeBucket; label: string; count: number; pct: number };
@@ -58,6 +96,7 @@ export type FacilitatorSummaryLite = {
 export type OrganizationIntelligence = {
   currentYear: number;
   previousYear: number | null;
+  period: PeriodInfo;
   activeEngagements: number;
   experiencesThisYear: number;
   experiencesLastYear: number;
@@ -176,7 +215,7 @@ export type FacilitatorDetailIntelligence = {
     availabilityStatus: string;
     expertiseAreas: string[];
   };
-  yearlyTrend: { year: number; avgSatisfaction: number | null; experiences: number }[];
+  yearlyTrend: { year: number; avgSatisfaction: number | null; experiences: number; isPartialCurrentYear: boolean }[];
   clientPortfolio: FacilitatorClientPortfolioEntry[];
   typePerformance: FacilitatorTypePerformance[];
   monthlyUtilization: FacilitatorMonthlyUtilization[];
@@ -191,6 +230,7 @@ export type DashboardIntelligenceSummary = {
   satisfactionDelta: number | null;
   experiencesThisYear: number;
   experiencesChangePct: number | null;
+  period: PeriodInfo;
   topOpportunity: { headline: string; detail: string } | null;
 };
 
@@ -392,6 +432,60 @@ function engagementYear(engagement: EngagementRow, currentYear: number): number 
   return engagement.start_date ? yearOf(engagement.start_date) : currentYear;
 }
 
+// ---------------------------------------------------------------------------
+// Period-aware comparison helpers
+//
+// A year that's still in progress can only ever be compared to the SAME
+// elapsed window in another year — comparing its partial total against a
+// full 12-month total makes every "vs last year" figure for that row
+// meaningless (e.g. "8 experiences, -86% vs 2024" when 2026 is only 7
+// months old). Every "this year vs last year" computation in this module
+// routes through the helpers below instead of a raw year-to-year diff.
+// ---------------------------------------------------------------------------
+
+/** A year is "in progress" iff it's the real current calendar year — not
+ * merely the latest year present in the dataset (a dataset that stops at
+ * 2024 while today is 2026 has no in-progress year at all). */
+function isYearInProgress(year: number, now: Date): boolean {
+  return year === now.getUTCFullYear();
+}
+
+/** "Jan 1 – Jul 25, 2024" — the same elapsed window as `now`, projected
+ * onto `year`. */
+function formatPeriodLabel(now: Date, year: number): string {
+  const start = new Date(Date.UTC(year, 0, 1));
+  const end = new Date(Date.UTC(year, now.getUTCMonth(), now.getUTCDate()));
+  const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  return `${fmt(start)} – ${fmt(end)}, ${year}`;
+}
+
+/** True when `dateStr` falls within `year`, on or before the same
+ * month/day as `now` — i.e. the year-to-date window used to build a
+ * period-matched comparison. */
+function isWithinYearToDate(dateStr: string, year: number, now: Date): boolean {
+  const d = new Date(dateStr);
+  if (d.getUTCFullYear() !== year) return false;
+  const cutoff = Date.UTC(year, now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999);
+  return d.getTime() <= cutoff;
+}
+
+/** The year to compare `currentYear` against: `currentYear - 1` if that
+ * year has any data, otherwise the most recent earlier year that does —
+ * per the rule "if prior year data for the equivalent period is
+ * unavailable, use the equivalent period from the most recent year that
+ * has data, and label it clearly." */
+function resolveComparisonYear(
+  currentYear: number,
+  yearsWithData: number[]
+): { year: number; isFallback: boolean } | null {
+  const adjacent = currentYear - 1;
+  if (yearsWithData.includes(adjacent)) {
+    return { year: adjacent, isFallback: false };
+  }
+  const earlier = yearsWithData.filter((y) => y < currentYear).sort((a, b) => b - a);
+  return earlier.length > 0 ? { year: earlier[0], isFallback: true } : null;
+}
+
 function typeMix(experiences: ExperienceRow[]): TypeMixEntry[] {
   const counts = new Map<ExperienceTypeBucket, number>();
   for (const exp of experiences) {
@@ -417,9 +511,13 @@ function typeMix(experiences: ExperienceRow[]): TypeMixEntry[] {
 function computeOrgIntelligence(dataset: RawDataset): OrganizationIntelligence {
   const { experiences } = dataset;
 
+  const now = new Date();
   const years = [...new Set(experiences.map((e) => yearOf(e.start_date)))].sort((a, b) => a - b);
-  const currentYear = years.length > 0 ? years[years.length - 1] : new Date().getUTCFullYear();
+  const currentYear = years.length > 0 ? years[years.length - 1] : now.getUTCFullYear();
   const previousYear = years.length > 1 ? years[years.length - 2] : null;
+
+  const isPartial = years.length > 0 && isYearInProgress(currentYear, now);
+  const comparisonResolution = isPartial ? resolveComparisonYear(currentYear, years) : null;
 
   const yearlyTrend: YearMetrics[] = years.map((year, index) => {
     const yearExperiences = experiences.filter((e) => yearOf(e.start_date) === year);
@@ -428,29 +526,66 @@ function computeOrgIntelligence(dataset: RawDataset): OrganizationIntelligence {
     const yearRevenue = dataset.engagements
       .filter((eng) => engagementYear(eng, currentYear) === year)
       .reduce((sum, eng) => sum + contractValueOf(eng), 0);
-
-    const prior = index > 0 ? years[index - 1] : null;
-    const priorExperiences = prior !== null ? experiences.filter((e) => yearOf(e.start_date) === prior) : [];
-    const priorResponses = priorExperiences.flatMap((e) => responsesFor(e, dataset));
-    const priorParticipants = priorExperiences.reduce((sum, e) => sum + participantsFor(e, dataset), 0);
-    const priorSatisfaction = avgOrNull(priorResponses);
     const satisfaction = avgOrNull(yearResponses);
+
+    const isThisRowPartial = year === currentYear && isPartial;
+
+    // Full years compare against the prior full year, same as before. The
+    // one in-progress year compares against the SAME elapsed window in the
+    // resolved comparison year — never that year's full 12 months.
+    let comparisonYearForRow: number | null = null;
+    let comparisonPeriodLabel: string | null = null;
+    let comparisonIsFallbackYear = false;
+    let comparisonExperiences: ExperienceRow[] = [];
+
+    if (isThisRowPartial && comparisonResolution) {
+      comparisonYearForRow = comparisonResolution.year;
+      comparisonIsFallbackYear = comparisonResolution.isFallback;
+      comparisonPeriodLabel = formatPeriodLabel(now, comparisonResolution.year);
+      comparisonExperiences = experiences.filter((e) => isWithinYearToDate(e.start_date, comparisonResolution.year, now));
+    } else if (index > 0) {
+      comparisonYearForRow = years[index - 1];
+      comparisonExperiences = experiences.filter((e) => yearOf(e.start_date) === comparisonYearForRow);
+    }
+
+    const comparisonExperiencesCount = comparisonYearForRow !== null ? comparisonExperiences.length : null;
+    const comparisonParticipantsCount =
+      comparisonYearForRow !== null ? comparisonExperiences.reduce((sum, e) => sum + participantsFor(e, dataset), 0) : null;
+    const comparisonAvgSatisfaction =
+      comparisonYearForRow !== null ? avgOrNull(comparisonExperiences.flatMap((e) => responsesFor(e, dataset))) : null;
 
     return {
       year,
       isCurrent: year === currentYear,
+      isPartial: isThisRowPartial,
       experiences: yearExperiences.length,
       participants: yearParticipants,
       avgSatisfaction: satisfaction,
       revenue: yearRevenue,
-      experiencesChangePct: prior !== null ? pctChange(yearExperiences.length, priorExperiences.length) : null,
-      participantsChangePct: prior !== null ? pctChange(yearParticipants, priorParticipants) : null,
-      satisfactionDelta: satisfaction !== null && priorSatisfaction !== null ? round1(satisfaction - priorSatisfaction) : null,
+      experiencesChangePct: comparisonExperiencesCount !== null ? pctChange(yearExperiences.length, comparisonExperiencesCount) : null,
+      participantsChangePct:
+        comparisonParticipantsCount !== null ? pctChange(yearParticipants, comparisonParticipantsCount) : null,
+      satisfactionDelta:
+        satisfaction !== null && comparisonAvgSatisfaction !== null ? round1(satisfaction - comparisonAvgSatisfaction) : null,
+      comparisonYear: comparisonYearForRow,
+      comparisonPeriodLabel,
+      comparisonIsFallbackYear,
+      comparisonExperiences: comparisonExperiencesCount,
+      comparisonParticipants: comparisonParticipantsCount,
+      comparisonAvgSatisfaction,
     };
   });
 
   const thisYearRow = yearlyTrend.find((y) => y.year === currentYear) ?? null;
-  const lastYearRow = previousYear !== null ? (yearlyTrend.find((y) => y.year === previousYear) ?? null) : null;
+
+  const period: PeriodInfo = {
+    isPartial,
+    currentYear,
+    currentPeriodLabel: isPartial ? formatPeriodLabel(now, currentYear) : `Full Year ${currentYear}`,
+    comparisonYear: isPartial ? (comparisonResolution?.year ?? null) : previousYear,
+    comparisonPeriodLabel: isPartial && comparisonResolution ? formatPeriodLabel(now, comparisonResolution.year) : null,
+    comparisonIsFallbackYear: isPartial ? (comparisonResolution?.isFallback ?? false) : false,
+  };
 
   const bestVolumeYear = yearlyTrend.reduce<YearMetrics | null>(
     (best, row) => (best === null || row.experiences > best.experiences ? row : best),
@@ -540,15 +675,16 @@ function computeOrgIntelligence(dataset: RawDataset): OrganizationIntelligence {
   return {
     currentYear,
     previousYear,
+    period,
     activeEngagements: dataset.engagements.filter((e) => e.status === "active").length,
-    experiencesThisYear: thisYearExperiences.length,
-    experiencesLastYear: lastYearExperiences.length,
+    experiencesThisYear: thisYearRow?.experiences ?? thisYearExperiences.length,
+    experiencesLastYear: thisYearRow?.comparisonExperiences ?? 0,
     experiencesChangePct: thisYearRow?.experiencesChangePct ?? null,
     participantsThisYear: thisYearRow?.participants ?? 0,
-    participantsLastYear: lastYearRow?.participants ?? 0,
+    participantsLastYear: thisYearRow?.comparisonParticipants ?? 0,
     participantsChangePct: thisYearRow?.participantsChangePct ?? null,
     satisfactionThisYear: thisYearRow?.avgSatisfaction ?? null,
-    satisfactionLastYear: lastYearRow?.avgSatisfaction ?? null,
+    satisfactionLastYear: thisYearRow?.comparisonAvgSatisfaction ?? null,
     satisfactionDelta: thisYearRow?.satisfactionDelta ?? null,
     yearlyTrend,
     bestVolumeYear: bestVolumeYear?.year ?? null,
@@ -576,11 +712,18 @@ export async function getOrganizationIntelligence(workspaceId: string): Promise<
 // Client Intelligence
 // ---------------------------------------------------------------------------
 
-/** "Last 2 years with data" avg vs the 2 years before that — used for both
- * the comparison-table trend arrow and the relationship-risk signal, so the
- * two stay consistent with each other. */
-function recentTrendDelta(yearMetrics: { year: number; avgSatisfaction: number | null }[]): number | null {
-  const withData = yearMetrics.filter((y) => y.avgSatisfaction !== null).sort((a, b) => b.year - a.year);
+/** "Last 2 FULL years with data" avg vs the 2 years before that — used for
+ * both the comparison-table trend arrow and the relationship-risk signal,
+ * so the two stay consistent with each other. A year still in progress is
+ * excluded entirely rather than blended in: its small, partial-year sample
+ * would otherwise swing "recent" satisfaction on noise alone (a single
+ * unlucky early response in month one of a new year), not a real trend. */
+function recentTrendDelta(
+  yearMetrics: { year: number; avgSatisfaction: number | null; isPartialCurrentYear?: boolean }[]
+): number | null {
+  const withData = yearMetrics
+    .filter((y) => y.avgSatisfaction !== null && !y.isPartialCurrentYear)
+    .sort((a, b) => b.year - a.year);
   if (withData.length < 2) return null;
 
   const recent = withData.slice(0, Math.min(2, withData.length));
@@ -602,6 +745,8 @@ function trendFromDelta(delta: number | null, threshold = 0.15): "up" | "down" |
 }
 
 function computeClientRows(dataset: RawDataset): ClientComparisonRow[] {
+  const now = new Date();
+
   return dataset.clients.map((client) => {
     const clientExperiences = dataset.experiences.filter((e) => e.client_id === client.id);
     const clientResponses = clientExperiences.flatMap((e) => responsesFor(e, dataset));
@@ -609,6 +754,7 @@ function computeClientRows(dataset: RawDataset): ClientComparisonRow[] {
     const yearMetrics = years.map((year) => ({
       year,
       avgSatisfaction: avgOrNull(clientExperiences.filter((e) => yearOf(e.start_date) === year).flatMap((e) => responsesFor(e, dataset))),
+      isPartialCurrentYear: isYearInProgress(year, now),
     }));
     const lastActiveDate = clientExperiences.reduce<string | null>(
       (latest, e) => (latest === null || e.start_date > latest ? e.start_date : latest),
@@ -649,9 +795,7 @@ function computeClientDetail(dataset: RawDataset, clientId: string): ClientDetai
   const allResponses = dataset.experiences.flatMap((e) => responsesFor(e, dataset));
   const clientResponses = clientExperiences.flatMap((e) => responsesFor(e, dataset));
 
-  // The dataset's current year (not just this client's) — a client with no
-  // experiences yet this year shouldn't make an earlier year look "current".
-  const datasetCurrentYear = dataset.experiences.reduce((max, e) => Math.max(max, yearOf(e.start_date)), 0);
+  const now = new Date();
 
   const years = [...new Set(clientExperiences.map((e) => yearOf(e.start_date)))].sort((a, b) => a - b);
   const yearlyTrend: ClientYearMetric[] = years.map((year) => {
@@ -661,7 +805,7 @@ function computeClientDetail(dataset: RawDataset, clientId: string): ClientDetai
       avgSatisfaction: avgOrNull(yearExperiences.flatMap((e) => responsesFor(e, dataset))),
       experiences: yearExperiences.length,
       participants: yearExperiences.reduce((sum, e) => sum + participantsFor(e, dataset), 0),
-      isPartialCurrentYear: year === datasetCurrentYear,
+      isPartialCurrentYear: isYearInProgress(year, now),
     };
   });
 
@@ -763,6 +907,8 @@ export async function getClientDetailIntelligence(clientId: string): Promise<Cli
 // ---------------------------------------------------------------------------
 
 function computeFacilitatorRows(dataset: RawDataset): FacilitatorComparisonRow[] {
+  const now = new Date();
+
   return dataset.facilitators
     .map((facilitator) => {
       const own = dataset.experiences.filter((e) => e.facilitator_email === facilitator.email);
@@ -773,6 +919,7 @@ function computeFacilitatorRows(dataset: RawDataset): FacilitatorComparisonRow[]
       const yearMetrics = years.map((year) => ({
         year,
         avgSatisfaction: avgOrNull(own.filter((e) => yearOf(e.start_date) === year).flatMap((e) => responsesFor(e, dataset))),
+        isPartialCurrentYear: isYearInProgress(year, now),
       }));
       const clientsServed = new Set(own.map((e) => e.client_id).filter((id): id is string => id !== null));
 
@@ -805,10 +952,17 @@ function computeFacilitatorDetail(dataset: RawDataset, facilitatorId: string): F
   const allResponses = dataset.experiences.flatMap((e) => responsesFor(e, dataset));
   const ownResponses = own.flatMap((e) => responsesFor(e, dataset));
 
+  const now = new Date();
+
   const years = [...new Set(own.map((e) => yearOf(e.start_date)))].sort((a, b) => a - b);
   const yearlyTrend = years.map((year) => {
     const yearExperiences = own.filter((e) => yearOf(e.start_date) === year);
-    return { year, avgSatisfaction: avgOrNull(yearExperiences.flatMap((e) => responsesFor(e, dataset))), experiences: yearExperiences.length };
+    return {
+      year,
+      avgSatisfaction: avgOrNull(yearExperiences.flatMap((e) => responsesFor(e, dataset))),
+      experiences: yearExperiences.length,
+      isPartialCurrentYear: isYearInProgress(year, now),
+    };
   });
 
   const clientGroups = new Map<string, { count: number; responses: number[] }>();
@@ -865,13 +1019,13 @@ function computeFacilitatorDetail(dataset: RawDataset, facilitatorId: string): F
       ? round1((allFacilitatorAverages.filter((v) => v < facilitatorAvg).length / allFacilitatorAverages.length) * 100)
       : null;
 
-  const now = Date.now();
-  const in90Days = now + 90 * 24 * 60 * 60 * 1000;
+  const nowMs = now.getTime();
+  const in90Days = nowMs + 90 * 24 * 60 * 60 * 1000;
   const upcoming: UpcomingExperience[] = dataset.experiences
     .filter((e) => e.facilitator_email === facilitator.email)
     .filter((e) => {
       const start = new Date(e.start_date).getTime();
-      return start >= now && start <= in90Days;
+      return start >= nowMs && start <= in90Days;
     })
     .sort((a, b) => a.start_date.localeCompare(b.start_date))
     .map((e) => ({
@@ -951,6 +1105,7 @@ export async function getDashboardIntelligenceSummary(workspaceId: string): Prom
     satisfactionDelta: org.satisfactionDelta,
     experiencesThisYear: org.experiencesThisYear,
     experiencesChangePct: org.experiencesChangePct,
+    period: org.period,
     topOpportunity,
   };
 }

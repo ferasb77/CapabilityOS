@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Lightbulb, Smile, TrendingUp } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
-import type { DashboardIntelligenceSummary } from "@/features/intelligence/data";
+import type { DashboardIntelligenceSummary, PeriodInfo } from "@/features/intelligence/data";
 import { formatPct, formatSatisfaction } from "@/features/intelligence/format";
 
 type CardConfig = {
@@ -12,7 +12,20 @@ type CardConfig = {
   href: string;
 };
 
+/** "for Jan 1 – Jul 25, 2026" when the year is still in progress, "in 2024"
+ * once it's a complete year — so a signal never implies a full-year figure
+ * when it's actually a year-to-date one. */
+function thisPeriodPhrase(period: PeriodInfo): string {
+  return period.isPartial ? `for ${period.currentPeriodLabel}` : `in ${period.currentYear}`;
+}
+
+function comparisonPeriodPhrase(period: PeriodInfo): string {
+  if (period.comparisonYear === null) return "the prior period";
+  return period.isPartial ? `the same period in ${period.comparisonYear}` : `${period.comparisonYear}`;
+}
+
 export function IntelligenceSummary({ summary }: { summary: DashboardIntelligenceSummary }) {
+  const { period } = summary;
   const satisfactionDirection =
     summary.satisfactionDelta === null || summary.satisfactionDelta === 0
       ? "flat"
@@ -34,8 +47,8 @@ export function IntelligenceSummary({ summary }: { summary: DashboardIntelligenc
         summary.satisfactionThisYear === null
           ? "Not enough survey data yet to compute a satisfaction signal."
           : satisfactionDirection === "flat"
-            ? `Portfolio satisfaction is ${formatSatisfaction(summary.satisfactionThisYear)} this year, unchanged from last year`
-            : `Portfolio satisfaction is ${formatSatisfaction(summary.satisfactionThisYear)} this year, ${satisfactionDirection} ${Math.abs(summary.satisfactionDelta as number)} points from last year`,
+            ? `Portfolio satisfaction is ${formatSatisfaction(summary.satisfactionThisYear)} ${thisPeriodPhrase(period)}, unchanged from ${comparisonPeriodPhrase(period)}`
+            : `Portfolio satisfaction is ${formatSatisfaction(summary.satisfactionThisYear)} ${thisPeriodPhrase(period)}, ${satisfactionDirection} ${Math.abs(summary.satisfactionDelta as number)} points from ${comparisonPeriodPhrase(period)}`,
       href: "/dashboard/intelligence",
     },
     {
@@ -43,8 +56,8 @@ export function IntelligenceSummary({ summary }: { summary: DashboardIntelligenc
       label: "Volume Signal",
       headline:
         volumeDirection === "flat" || summary.experiencesChangePct === null
-          ? `${summary.experiencesThisYear.toLocaleString()} experiences delivered this year, about the same as the prior year`
-          : `${summary.experiencesThisYear.toLocaleString()} experiences delivered this year, ${formatPct(Math.abs(summary.experiencesChangePct))} ${volumeDirection === "up" ? "more" : "fewer"} than the prior year`,
+          ? `${summary.experiencesThisYear.toLocaleString()} experiences delivered ${thisPeriodPhrase(period)}, about the same as ${comparisonPeriodPhrase(period)}`
+          : `${summary.experiencesThisYear.toLocaleString()} experiences delivered ${thisPeriodPhrase(period)}, ${formatPct(Math.abs(summary.experiencesChangePct))} ${volumeDirection === "up" ? "more" : "fewer"} than ${comparisonPeriodPhrase(period)}`,
       href: "/dashboard/intelligence",
     },
     {

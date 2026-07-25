@@ -46,7 +46,7 @@ export function ClientDetailPanel({ row, data }: { row: ClientComparisonRow; dat
             ) : (
               <ColumnBarChart
                 entries={data.yearlyTrend.map((y) => ({
-                  label: String(y.year),
+                  label: y.isPartialCurrentYear ? `${y.year} (YTD)` : String(y.year),
                   value: y.avgSatisfaction ?? 0,
                   colorClassName: "bg-gold",
                 }))}
@@ -67,11 +67,17 @@ export function ClientDetailPanel({ row, data }: { row: ClientComparisonRow; dat
               <p className="text-sm text-muted-foreground">No experiences on record for this client.</p>
             ) : (
               <>
-                <ColumnBarChart entries={data.yearlyTrend.map((y) => ({ label: String(y.year), value: y.experiences }))} />
+                <ColumnBarChart
+                  entries={data.yearlyTrend.map((y) => ({
+                    label: y.isPartialCurrentYear ? `${y.year} (YTD)` : String(y.year),
+                    value: y.experiences,
+                  }))}
+                />
                 <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   {data.yearlyTrend.map((y) => (
                     <span key={y.year}>
-                      {y.year}: {y.participants.toLocaleString()} participants
+                      {y.year}
+                      {y.isPartialCurrentYear ? " (YTD)" : ""}: {y.participants.toLocaleString()} participants
                     </span>
                   ))}
                 </div>

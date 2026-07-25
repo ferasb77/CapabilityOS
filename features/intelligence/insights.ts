@@ -339,9 +339,11 @@ export function generateFacilitatorInsights(facilitator: FacilitatorComparisonRo
     }
   }
 
-  // Volume trend.
+  // Volume trend — skips any transition into the current in-progress year,
+  // since its year-to-date count is never comparable to a prior full year.
   const growthRates: number[] = [];
   for (let i = 1; i < data.yearlyTrend.length; i++) {
+    if (data.yearlyTrend[i].isPartialCurrentYear) continue;
     const prior = data.yearlyTrend[i - 1].experiences;
     const current = data.yearlyTrend[i].experiences;
     if (prior > 0) growthRates.push(((current - prior) / prior) * 100);
