@@ -35,6 +35,35 @@ export type ParticipantListItem = {
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
+const MAX_FETCH_PAGE = 1000;
+
+/** Supabase/PostgREST caps a plain `.select()` at 1000 rows by default, and
+ * an `.in(column, ids)` filter built from an unbounded id list can also blow
+ * past the request's max URL length once there are thousands of ids (this
+ * is exactly what was crashing /dashboard/participants with a 400 Bad
+ * Request once the workspace passed ~1000 participants — see Sprint 25's
+ * fetchAllRows in infrastructure/repositories/dashboard.ts for the same
+ * guard applied there). Every query here that can plausibly return/scope
+ * more than 1000 rows goes through this pager and never builds an `.in()`
+ * list from a full, unbounded id set. */
+async function fetchAllRows<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const allRows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await buildQuery(from, from + MAX_FETCH_PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    allRows.push(...rows);
+    if (rows.length < MAX_FETCH_PAGE) break;
+    from += MAX_FETCH_PAGE;
+  }
+
+  return allRows;
+}
+
 type ParticipantRow = {
   id: string;
   first_name: string;
@@ -121,38 +150,32 @@ export async function fetchFilteredParticipants(
     return [];
   }
 
-  let participantsQuery = supabase
-    .from("participants")
-    .select(
-      "id, first_name, last_name, email, mobile, company, job_title, workshop_slug, checked_in, checked_in_at, created_at"
-    )
-    .order("created_at", { ascending: false });
+  const participantRows = await fetchAllRows<ParticipantRow>((from, to) => {
+    let query = supabase
+      .from("participants")
+      .select(
+        "id, first_name, last_name, email, mobile, company, job_title, workshop_slug, checked_in, checked_in_at, created_at"
+      )
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
-  if (isScoped) {
-    participantsQuery = participantsQuery.in(
-      "workshop_slug",
-      experienceRows.map((row) => row.slug)
-    );
-  }
+    if (isScoped) {
+      query = query.in(
+        "workshop_slug",
+        experienceRows.map((row) => row.slug)
+      );
+    }
 
-  if (filters.checkinStatus === "checked_in") {
-    participantsQuery = participantsQuery.eq("checked_in", true);
-  } else if (filters.checkinStatus === "not_checked_in") {
-    participantsQuery = participantsQuery.eq("checked_in", false);
-  }
+    if (filters.checkinStatus === "checked_in") {
+      query = query.eq("checked_in", true);
+    } else if (filters.checkinStatus === "not_checked_in") {
+      query = query.eq("checked_in", false);
+    }
 
-  const { data: participantData, error: participantsError } = await participantsQuery;
+    return query;
+  });
 
-  if (participantsError) {
-    throw new Error(participantsError.message);
-  }
-
-  const participantRows: ParticipantRow[] = participantData ?? [];
-
-  const tokenByParticipantId = await fetchSurveyTokensByParticipantId(
-    supabase,
-    participantRows.map((row) => row.id)
-  );
+  const tokenByParticipantId = await fetchSatisfactionSurveyTokenMap(supabase);
 
   let items: ParticipantListItem[] = participantRows.map((row) => {
     const experience = experienceBySlug.get(row.workshop_slug);
@@ -193,25 +216,24 @@ export async function fetchFilteredParticipants(
   return items;
 }
 
-async function fetchSurveyTokensByParticipantId(
-  supabase: SupabaseServerClient,
-  participantIds: string[]
-): Promise<Map<string, SurveyTokenRow>> {
-  if (participantIds.length === 0) {
-    return new Map();
-  }
+/**
+ * Every satisfaction survey_tokens row, keyed by participant_id. Fetched in
+ * full (paginated, not scoped by an `.in(participant_id, ...)` list) so this
+ * works the same way whether the caller needs one participant's token or
+ * every participant's — an `.in()` filter built from a large id list is
+ * exactly what was crashing the unscoped participants list with a 400 Bad
+ * Request (see fetchAllRows's comment above).
+ */
+async function fetchSatisfactionSurveyTokenMap(supabase: SupabaseServerClient): Promise<Map<string, SurveyTokenRow>> {
+  const rows = await fetchAllRows<SurveyTokenRow>((from, to) =>
+    supabase
+      .from("survey_tokens")
+      .select("participant_id, sent_at, completed_at")
+      .eq("survey_type", "satisfaction")
+      .range(from, to)
+  );
 
-  const { data, error } = await supabase
-    .from("survey_tokens")
-    .select("participant_id, sent_at, completed_at")
-    .in("participant_id", participantIds)
-    .eq("survey_type", "satisfaction");
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return new Map((data ?? []).map((row) => [row.participant_id, row]));
+  return new Map(rows.map((row) => [row.participant_id, row]));
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +389,7 @@ export async function getParticipantById(anchorId: string): Promise<ParticipantD
   );
 
   const participantIds = personRows.map((row) => row.id);
-  const tokenByParticipantId = await fetchSurveyTokensByParticipantId(supabase, participantIds);
+  const tokenByParticipantId = await fetchSatisfactionSurveyTokenMap(supabase);
 
   const { data: responseRows, error: responseError } = await supabase
     .from("survey_responses")
