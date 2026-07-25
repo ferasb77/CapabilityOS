@@ -2,6 +2,32 @@ import { createClient } from "@/infrastructure/supabase/server";
 
 export type AvailabilityStatus = "available" | "partially_available" | "unavailable";
 
+const MAX_FETCH_PAGE = 1000;
+
+/** Supabase/PostgREST caps a plain `.select()` at 1000 rows by default —
+ * getFacilitatorDeliveryHistory used to read the entire `experiences` table
+ * in one unpaginated call before filtering to one facilitator client-side,
+ * which would silently truncate once the table crosses 1000 rows. Same
+ * guard as infrastructure/repositories/dashboard.ts and
+ * features/participants/data.ts's fetchAllRows. */
+async function fetchAllRows<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const allRows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await buildQuery(from, from + MAX_FETCH_PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    allRows.push(...rows);
+    if (rows.length < MAX_FETCH_PAGE) break;
+    from += MAX_FETCH_PAGE;
+  }
+
+  return allRows;
+}
+
 // ---------------------------------------------------------------------------
 // Directory summary
 // ---------------------------------------------------------------------------
@@ -250,23 +276,31 @@ export type FacilitatorDeliveryHistory = {
   workshops: FacilitatorDeliveryWorkshop[];
 };
 
+type FacilitatorDeliveryExperienceRow = {
+  id: string;
+  slug: string;
+  title: string;
+  start_date: string;
+  venue: string | null;
+  facilitator_email: string | null;
+};
+
 export async function getFacilitatorDeliveryHistory(
   email: string
 ): Promise<FacilitatorDeliveryHistory> {
   const supabase = await createClient();
 
-  const { data: workshopRows, error: workshopsError } = await supabase
-    .from("experiences")
-    .select("id, slug, title, start_date, venue, facilitator_email")
-    .not("facilitator_email", "is", null)
-    .is("deleted_at", null);
-
-  if (workshopsError) {
-    throw new Error(workshopsError.message);
-  }
+  const workshopRows = await fetchAllRows<FacilitatorDeliveryExperienceRow>((from, to) =>
+    supabase
+      .from("experiences")
+      .select("id, slug, title, start_date, venue, facilitator_email")
+      .not("facilitator_email", "is", null)
+      .is("deleted_at", null)
+      .range(from, to)
+  );
 
   const normalizedEmail = email.toLowerCase();
-  const matched = (workshopRows ?? []).filter(
+  const matched = workshopRows.filter(
     (row) => row.facilitator_email?.toLowerCase() === normalizedEmail
   );
 

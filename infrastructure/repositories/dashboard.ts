@@ -204,6 +204,7 @@ const ACTIVE_ENGAGEMENTS_LIMIT = 5;
 const TOP_FACILITATORS_LIMIT = 5;
 const HIGH_WORKLOAD_THRESHOLD = 4;
 const MAX_FETCH_PAGE = 1000;
+const IN_FILTER_SAFE_LIMIT = 200;
 
 /** Supabase/PostgREST caps a plain `.select()` at 1000 rows by default — this
  * dataset's participants table alone runs into the thousands (Sprint 22's
@@ -226,6 +227,41 @@ async function fetchAllRows<T>(
   }
 
   return allRows;
+}
+
+/**
+ * Fetches rows scoped to a dynamic id list via `.in()` — but an `.in()`
+ * filter built from an unbounded id list is exactly the failure mode that
+ * crashed /dashboard/participants (a request URL too long for the Supabase
+ * gateway to accept). The three callers of this helper build their id lists
+ * from a rolling 90-day date window rather than the full table, so they're
+ * small today, but nothing enforces a ceiling on how many experiences can
+ * fall inside that window as delivery volume grows. Past IN_FILTER_SAFE_LIMIT
+ * ids, this falls back to fetching the table without the `.in()` filter
+ * (paginated) and filtering to the id set client-side instead — slower, but
+ * immune to the URL-length failure regardless of scale. `queryWithoutIn`
+ * still carries whatever non-`.in()` filters (workspace_id, deleted_at) the
+ * caller needs; only the `.in()` clause itself is dropped.
+ */
+async function fetchScopedByIds<T>(
+  ids: string[],
+  idOf: (row: T) => string,
+  label: string,
+  queryWithIn: (from: number, to: number, ids: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  queryWithoutIn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  if (ids.length === 0) return [];
+
+  if (ids.length > IN_FILTER_SAFE_LIMIT) {
+    console.warn(
+      `[dashboard] ${label}: id list has ${ids.length} entries, over the ${IN_FILTER_SAFE_LIMIT}-item .in() safety limit — falling back to an unfiltered fetch with client-side filtering.`
+    );
+    const idSet = new Set(ids);
+    const allRows = await fetchAllRows<T>(queryWithoutIn);
+    return allRows.filter((row) => idSet.has(idOf(row)));
+  }
+
+  return fetchAllRows<T>((from, to) => queryWithIn(from, to, ids));
 }
 
 function startOfDay(date: Date): Date {
@@ -360,36 +396,52 @@ export async function getDashboardData(): Promise<DashboardData> {
   const certificatesRelevantIds = [...new Set(recentlyCompleted90.map((e) => e.id))];
 
   const [logisticsTasks, materials, certificates] = await Promise.all([
-    logisticsRelevantIds.length > 0
-      ? fetchAllRows<LogisticsTaskRow>((from, to) =>
-          supabase
-            .from("logistics_tasks")
-            .select("workshop_id, due_date, status")
-            .in("workshop_id", logisticsRelevantIds)
-            .range(from, to)
-        )
-      : Promise.resolve([] as LogisticsTaskRow[]),
-    materialsRelevantIds.length > 0
-      ? fetchAllRows<MaterialRow>((from, to) =>
-          supabase
-            .from("experience_materials")
-            .select("experience_id")
-            .eq("workspace_id", session.workspaceId)
-            .is("deleted_at", null)
-            .in("experience_id", materialsRelevantIds)
-            .range(from, to)
-        )
-      : Promise.resolve([] as MaterialRow[]),
-    certificatesRelevantIds.length > 0
-      ? fetchAllRows<CertificateRow>((from, to) =>
-          supabase
-            .from("certificates")
-            .select("participant_id, experience_id, revoked_at")
-            .eq("workspace_id", session.workspaceId)
-            .in("experience_id", certificatesRelevantIds)
-            .range(from, to)
-        )
-      : Promise.resolve([] as CertificateRow[]),
+    fetchScopedByIds<LogisticsTaskRow>(
+      logisticsRelevantIds,
+      (row) => row.workshop_id,
+      "logistics_tasks",
+      (from, to, ids) =>
+        supabase.from("logistics_tasks").select("workshop_id, due_date, status").in("workshop_id", ids).range(from, to),
+      (from, to) => supabase.from("logistics_tasks").select("workshop_id, due_date, status").range(from, to)
+    ),
+    fetchScopedByIds<MaterialRow>(
+      materialsRelevantIds,
+      (row) => row.experience_id,
+      "experience_materials",
+      (from, to, ids) =>
+        supabase
+          .from("experience_materials")
+          .select("experience_id")
+          .eq("workspace_id", session.workspaceId)
+          .is("deleted_at", null)
+          .in("experience_id", ids)
+          .range(from, to),
+      (from, to) =>
+        supabase
+          .from("experience_materials")
+          .select("experience_id")
+          .eq("workspace_id", session.workspaceId)
+          .is("deleted_at", null)
+          .range(from, to)
+    ),
+    fetchScopedByIds<CertificateRow>(
+      certificatesRelevantIds,
+      (row) => row.experience_id,
+      "certificates",
+      (from, to, ids) =>
+        supabase
+          .from("certificates")
+          .select("participant_id, experience_id, revoked_at")
+          .eq("workspace_id", session.workspaceId)
+          .in("experience_id", ids)
+          .range(from, to),
+      (from, to) =>
+        supabase
+          .from("certificates")
+          .select("participant_id, experience_id, revoked_at")
+          .eq("workspace_id", session.workspaceId)
+          .range(from, to)
+    ),
   ]);
 
   type LogisticsSummary = { total: number; complete: number; overdue: number };
