@@ -6,14 +6,14 @@ import type { ExperienceType } from "./schema";
 // Options (for select/filter dropdowns elsewhere in the app)
 // ---------------------------------------------------------------------------
 
-export type ExperienceOption = { id: string; title: string };
+export type ExperienceOption = { id: string; title: string; clientId: string | null };
 
 export async function getExperienceOptions(): Promise<ExperienceOption[]> {
   const supabase = await createClient();
 
   const { data, error } = await supabase
     .from("experiences")
-    .select("id, title")
+    .select("id, title, client_id")
     .is("deleted_at", null)
     .order("title", { ascending: true });
 
@@ -21,7 +21,11 @@ export async function getExperienceOptions(): Promise<ExperienceOption[]> {
     throw new Error(error.message);
   }
 
-  return data ?? [];
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    title: row.title,
+    clientId: row.client_id,
+  }));
 }
 
 // ---------------------------------------------------------------------------

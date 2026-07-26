@@ -56,7 +56,7 @@ export default async function ParticipantsPage({ searchParams }: Props) {
         totalCount={result.totalCount}
         page={result.page}
         totalPages={result.totalPages}
-        experiences={experiences.map((e) => ({ id: e.id, title: e.title }))}
+        experiences={experiences.map((e) => ({ id: e.id, title: e.title, clientId: e.clientId }))}
         clients={clients}
         currentFilters={{
           experienceId: filters.experienceId,

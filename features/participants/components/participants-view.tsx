@@ -77,7 +77,7 @@ type Props = {
   totalCount: number;
   page: number;
   totalPages: number;
-  experiences: { id: string; title: string }[];
+  experiences: { id: string; title: string; clientId: string | null }[];
   clients: { id: string; name: string }[];
   currentFilters: {
     experienceId?: string;
@@ -110,6 +110,13 @@ export function ParticipantsView({
       [participant.fullName, participant.company ?? ""].join(" ").toLowerCase().includes(query)
     );
   }, [participants, search]);
+
+  const availableExperiences = useMemo(() => {
+    if (!currentFilters.clientId) {
+      return experiences;
+    }
+    return experiences.filter((experience) => experience.clientId === currentFilters.clientId);
+  }, [experiences, currentFilters.clientId]);
 
   function navigate(updates: Record<string, string | null>) {
     const params = new URLSearchParams();
@@ -178,23 +185,25 @@ export function ParticipantsView({
 
         <div className="flex flex-wrap gap-3">
           <Select
-            key={`experience-${currentFilters.experienceId ?? ""}`}
+            key={`experience-${currentFilters.clientId ?? ""}-${currentFilters.experienceId ?? ""}`}
             defaultValue={currentFilters.experienceId ?? ALL}
             onValueChange={(value) =>
               navigate({
                 experienceId: value === ALL ? null : (value ?? null),
-                clientId: null,
                 page: null,
               })
             }
-            items={[{ value: ALL, label: "All Experiences" }, ...experiences.map((e) => ({ value: e.id, label: e.title }))]}
+            items={[
+              { value: ALL, label: "All Experiences" },
+              ...availableExperiences.map((e) => ({ value: e.id, label: e.title })),
+            ]}
           >
             <SelectTrigger className="w-full sm:w-[220px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL}>All Experiences</SelectItem>
-              {experiences.map((experience) => (
+              {availableExperiences.map((experience) => (
                 <SelectItem key={experience.id} value={experience.id}>
                   {experience.title}
                 </SelectItem>
