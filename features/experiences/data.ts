@@ -8,6 +8,55 @@ import type { ExperienceType } from "./schema";
 
 export type ExperienceOption = { id: string; title: string; clientId: string | null };
 
+// ---------------------------------------------------------------------------
+// Public check-in form (/r/[slug])
+// ---------------------------------------------------------------------------
+
+export type CheckinExperienceContext = {
+  title: string;
+  experienceType: ExperienceType;
+  venue: string | null;
+  startDate: string;
+  endDate: string;
+};
+
+type CheckinContextRpcRow = {
+  title: string;
+  experience_type: ExperienceType;
+  venue: string | null;
+  start_date: string;
+  end_date: string;
+};
+
+/**
+ * `experiences` is RLS-scoped to the authenticated user's own organization/
+ * workspace, so a signed-out visitor on the public check-in form can't read
+ * it via the ordinary session-bound client — that query just comes back
+ * empty, no error. get_checkin_context (migration 0021) is a narrow,
+ * security definer RPC exposing only what this page needs to display,
+ * mirroring get_survey_context and get_materials_by_token's existing
+ * pattern for other public, token/slug-driven pages.
+ */
+export async function getCheckinContextBySlug(slug: string): Promise<CheckinExperienceContext | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc("get_checkin_context", { p_slug: slug }).maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  const row = data as CheckinContextRpcRow;
+
+  return {
+    title: row.title,
+    experienceType: row.experience_type,
+    venue: row.venue,
+    startDate: row.start_date,
+    endDate: row.end_date,
+  };
+}
+
 export async function getExperienceOptions(): Promise<ExperienceOption[]> {
   const supabase = await createClient();
 

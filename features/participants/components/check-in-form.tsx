@@ -12,8 +12,10 @@ const initialState: CheckInResult = {
 
 export function CheckInForm({
   workshopSlug,
+  experienceTypeLabel,
 }: {
   workshopSlug: string;
+  experienceTypeLabel: string;
 }) {
   const [state, action, pending] = useActionState(
     checkInParticipant,
@@ -34,7 +36,7 @@ export function CheckInForm({
 
       <div>
         <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-          Workshop Check-In
+          {experienceTypeLabel} Check-In
         </h2>
 
         <p className="mt-2 text-sm text-slate-500">

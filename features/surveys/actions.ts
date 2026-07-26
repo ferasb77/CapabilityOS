@@ -12,6 +12,7 @@ import {
   renderSurveyReminderEmail,
 } from "@/infrastructure/email/survey-email";
 import { createClient } from "@/infrastructure/supabase/server";
+import { createServiceRoleClient } from "@/infrastructure/supabase/service-role";
 import { maybeAutoIssueCertificate } from "@/features/certificates/actions";
 
 import {
@@ -1215,7 +1216,13 @@ export async function sendPostTrainingSurveyToAll(experienceId: string, experien
 
 export async function sendPreTrainingSurveyOnRegistration(participantId: string, experienceId: string): Promise<void> {
   try {
-    const supabase = await createClient();
+    // Called from the anonymous public check-in flow (features/participants/
+    // actions.ts) — there's no session to bind to, and both the lookups
+    // below and ensureTokenAndSend's survey_tokens insert require the
+    // `authenticated` role under RLS. The service-role client bypasses that,
+    // matching maybeAutoIssueCertificate/createOrGetMaterialToken, which
+    // already do the same for this exact fire-and-forget path.
+    const supabase = createServiceRoleClient();
 
     const { data: config } = await supabase
       .from("experience_survey_templates")

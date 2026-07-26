@@ -2,7 +2,7 @@
 
 import { participantSchema } from "./schema";
 import type { CheckInResult } from "./types";
-import { createClient } from "@/infrastructure/supabase/server";
+import { createServiceRoleClient } from "@/infrastructure/supabase/service-role";
 import { fetchFilteredParticipants } from "./data";
 import type { ParticipantFilters, ParticipantSurveyStatus } from "./data";
 import { maybeAutoIssueCertificate } from "@/features/certificates/actions";
@@ -38,7 +38,22 @@ export async function checkInParticipant(
     };
   }
 
-  const supabase = await createClient();
+  // Anonymous check-in visitors have no session, and `participants` grants
+  // no SELECT policy to `anon` at all — this duplicate check used to come
+  // back empty for every anonymous submission (silently, no error), so
+  // re-checking in with the same email never got caught. Separately,
+  // `INSERT ... RETURNING` requires the executing role to also satisfy a
+  // SELECT policy on the row being returned; since `anon` has none, the
+  // insert below would hard-fail with "new row violates row-level security
+  // policy" the moment `.select()` is chained after it — confirmed live
+  // against the real anon key: identical insert with no `.select()`
+  // succeeds (201), the same insert with `.select()` fails (42501).
+  // Granting anon broad SELECT on participants would fix both but expose
+  // every participant's name/email/mobile/company to any anonymous visitor
+  // via the public API, so this uses the service-role client instead,
+  // matching maybeAutoIssueCertificate/createOrGetMaterialToken's existing
+  // pattern for this same public, session-less flow.
+  const supabase = createServiceRoleClient();
 
   const { data: existing } = await supabase
     .from("participants")
@@ -93,11 +108,17 @@ export async function checkInParticipant(
   let materialsUrl: string | null = null;
 
   if (insertedParticipant) {
+    // Anonymous check-in visitors have no session, and `experiences`
+    // SELECT is restricted to `authenticated` — the ordinary session-bound
+    // client silently returns nothing here, which used to skip all three
+    // side effects below for every real check-in. get_experience_for_checkin
+    // (migration 0022) is a security-definer RPC scoped to just an id;
+    // called here via the service-role client (already in use above),
+    // matching how maybeAutoIssueCertificate/createOrGetMaterialToken
+    // already bypass RLS for this same fire-and-forget path.
     const { data: experienceRow } = await supabase
-      .from("experiences")
-      .select("id")
-      .eq("slug", parsed.data.workshopSlug)
-      .maybeSingle();
+      .rpc("get_experience_for_checkin", { p_slug: parsed.data.workshopSlug })
+      .maybeSingle<{ id: string }>();
 
     if (experienceRow) {
       void maybeAutoIssueCertificate(insertedParticipant.id, experienceRow.id);
