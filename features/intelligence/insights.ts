@@ -1,5 +1,6 @@
 import {
   Activity,
+  AlertTriangle,
   Award,
   Calendar,
   ClipboardCheck,
@@ -21,11 +22,13 @@ import type {
   ClientDetailIntelligence,
   FacilitatorComparisonRow,
   FacilitatorDetailIntelligence,
+  FinancialIntelligence,
   OperationalEfficiency,
   OrganizationIntelligence,
   PortfolioIntelligence,
   SatisfactionIntelligence,
 } from "./data";
+import { formatCurrency } from "./format";
 
 // ---------------------------------------------------------------------------
 // Pure, deterministic insight generation — no AI, no API calls. Every
@@ -708,4 +711,48 @@ export function generateOperationalInsights(data: OperationalEfficiency): Insigh
       metric: `${m.pct}%`,
     }))
     .slice(0, 5);
+}
+
+// ---------------------------------------------------------------------------
+// Financial Intelligence insights
+// ---------------------------------------------------------------------------
+
+const COLLECTION_EFFICIENCY_TARGET_PCT = 70;
+const RECEIVABLES_CONCENTRATION_WARNING_PCT = 50;
+
+export function generateFinancialInsights(data: FinancialIntelligence): InsightCard[] {
+  const insights: InsightCard[] = [];
+
+  if (data.triggeredNotInvoicedOver14Days.count > 0) {
+    insights.push({
+      icon: AlertTriangle,
+      headline: `Revenue leakage risk: ${data.triggeredNotInvoicedOver14Days.count} milestone${data.triggeredNotInvoicedOver14Days.count === 1 ? "" : "s"} triggered but not invoiced, representing ${formatCurrency(data.triggeredNotInvoicedOver14Days.totalAmount)}`,
+      detail: "Each has been triggered for more than 14 days without an invoice being sent.",
+      type: "warning",
+      metric: formatCurrency(data.triggeredNotInvoicedOver14Days.totalAmount),
+    });
+  }
+
+  if (data.collectionEfficiencyPct !== null && data.collectionEfficiencyPct < COLLECTION_EFFICIENCY_TARGET_PCT) {
+    insights.push({
+      icon: TrendingDown,
+      headline: `Collection efficiency below target — ${data.collectionEfficiencyPct}% of triggered milestones collect within 30 days`,
+      detail: `Target is ${COLLECTION_EFFICIENCY_TARGET_PCT}%. Worth reviewing the invoicing and follow-up cadence.`,
+      type: "warning",
+      metric: `${data.collectionEfficiencyPct}%`,
+    });
+  }
+
+  const topReceivable = data.outstandingReceivablesByClient[0];
+  if (topReceivable && topReceivable.pct > RECEIVABLES_CONCENTRATION_WARNING_PCT) {
+    insights.push({
+      icon: DollarSign,
+      headline: `Receivables concentration risk — ${topReceivable.clientName} represents ${topReceivable.pct}% of outstanding invoiced revenue`,
+      detail: `${formatCurrency(topReceivable.outstanding)} outstanding from a single client.`,
+      type: "warning",
+      metric: `${topReceivable.pct}%`,
+    });
+  }
+
+  return insights.slice(0, 5);
 }

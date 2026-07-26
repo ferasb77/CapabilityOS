@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/infrastructure/supabase/server";
+import { triggerEngagementSigningMilestones } from "@/features/financial/actions";
 
 import { engagementSchema } from "./schema";
 
@@ -90,6 +91,10 @@ export async function createEngagement(
     };
   }
 
+  if (data.status === "active") {
+    void triggerEngagementSigningMilestones(inserted.id);
+  }
+
   revalidatePath(`/dashboard/clients/${clientId}`);
   revalidatePath("/dashboard");
   redirect(`/dashboard/clients/${clientId}/engagements/${inserted.id}`);
@@ -127,6 +132,8 @@ export async function updateEngagement(
   const data = parsed.data;
   const supabase = await createClient();
 
+  const { data: existing } = await supabase.from("engagements").select("status").eq("id", engagementId).maybeSingle();
+
   const { error } = await supabase
     .from("engagements")
     .update({
@@ -150,6 +157,14 @@ export async function updateEngagement(
       error: "Unable to save changes. Please try again.",
       values,
     };
+  }
+
+  // Only fire on the transition into "active" — without this guard, every
+  // subsequent save of an already-active engagement (editing notes, dates,
+  // ...) would re-run the query. Harmless either way (triggerMilestoneCore
+  // only ever advances a "pending" row), but pointless repeat work.
+  if (data.status === "active" && existing?.status !== "active") {
+    void triggerEngagementSigningMilestones(engagementId);
   }
 
   revalidatePath(`/dashboard/clients/${clientId}/engagements/${engagementId}`);

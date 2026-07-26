@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/infrastructure/supabase/server";
 import type { ExperienceStatus } from "@/infrastructure/repositories/dashboard";
 import { sendPostTrainingSurveysOnCompletion } from "@/features/surveys/actions";
+import { triggerExperienceCompletionMilestones } from "@/features/financial/actions";
 
 import { createExperienceSchema, updateExperienceSchema, EXPERIENCE_STATUS_TRANSITIONS } from "./schema";
 
@@ -315,6 +316,7 @@ export async function updateExperience(
   // fail the status update itself.
   if (data.status === "completed") {
     void sendPostTrainingSurveysOnCompletion(experienceId);
+    void triggerExperienceCompletionMilestones(experienceId);
   }
 
   revalidatePath(`/dashboard/experiences/${experienceSlug}`);

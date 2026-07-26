@@ -1,11 +1,14 @@
 import { IntelTabs } from "@/features/intelligence/components/intel-tabs";
 import { PortfolioIntelligenceView } from "@/features/intelligence/components/portfolio-intelligence-view";
-import { getPortfolioIntelligence } from "@/features/intelligence/data";
+import { getFinancialIntelligence, getPortfolioIntelligence } from "@/features/intelligence/data";
 import { getSessionContext } from "@/infrastructure/session/session-context";
 
 export default async function PortfolioIntelligencePage() {
   const session = await getSessionContext();
-  const data = await getPortfolioIntelligence(session.workspaceId);
+  const [data, financial] = await Promise.all([
+    getPortfolioIntelligence(session.workspaceId),
+    getFinancialIntelligence(session.workspaceId),
+  ]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -16,7 +19,7 @@ export default async function PortfolioIntelligencePage() {
 
       <IntelTabs activeTab="portfolio" />
 
-      <PortfolioIntelligenceView data={data} />
+      <PortfolioIntelligenceView data={data} financial={financial} />
     </div>
   );
 }

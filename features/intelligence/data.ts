@@ -1888,6 +1888,151 @@ export async function getOperationalEfficiency(workspaceId: string): Promise<Ope
 }
 
 // ---------------------------------------------------------------------------
+// Financial Intelligence
+//
+// Reads payment_milestones directly — a table no other intelligence query
+// touches — scoped to the same clients/engagements `loadDataset` already
+// resolved for this workspace. Same "own fetch, reuse loadDataset for
+// lookups" pattern as Operational Efficiency above, rather than growing the
+// shared RawDataset for every other page's sake.
+// ---------------------------------------------------------------------------
+
+export type FinancialStatusBucket = "collected" | "invoiced" | "triggered" | "pending";
+
+export type RevenueByStatusEntry = { status: FinancialStatusBucket; label: string; amount: number; pct: number };
+
+export type CollectedByClientEntry = { clientId: string; clientName: string; collected: number; pct: number };
+
+export type ReceivablesByClientEntry = { clientId: string; clientName: string; outstanding: number; pct: number };
+
+export type FinancialIntelligence = {
+  totalMilestoneValue: number;
+  revenueByStatus: RevenueByStatusEntry[];
+  /** % of ever-triggered milestones that reached "collected" within 30 days
+   * of their trigger date. Null when no milestone has ever been triggered. */
+  collectionEfficiencyPct: number | null;
+  avgDaysToInvoice: number | null;
+  avgDaysToCollect: number | null;
+  revenueConcentrationTop3: CollectedByClientEntry[];
+  outstandingReceivablesByClient: ReceivablesByClientEntry[];
+  triggeredNotInvoicedOver14Days: { count: number; totalAmount: number };
+};
+
+type FinancialMilestoneRow = {
+  engagement_id: string;
+  amount: number | string;
+  status: "pending" | "triggered" | "invoiced" | "collected" | "overdue";
+  triggered_at: string | null;
+  invoiced_at: string | null;
+  collected_at: string | null;
+};
+
+function daysBetweenIso(earlier: string, later: string): number {
+  return (new Date(later).getTime() - new Date(earlier).getTime()) / (1000 * 60 * 60 * 24);
+}
+
+export async function getFinancialIntelligence(workspaceId: string): Promise<FinancialIntelligence> {
+  const dataset = await loadDataset(workspaceId);
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("payment_milestones")
+    .select("engagement_id, amount, status, triggered_at, invoiced_at, collected_at")
+    .eq("workspace_id", workspaceId)
+    .is("deleted_at", null);
+
+  if (error) throw new Error(error.message);
+
+  const milestones = (data ?? []) as FinancialMilestoneRow[];
+
+  const engagementClientId = new Map(dataset.engagements.map((e) => [e.id, e.client_id]));
+  const clientName = new Map(dataset.clients.map((c) => [c.id, c.name]));
+
+  const totalMilestoneValue = milestones.reduce((sum, m) => sum + Number(m.amount), 0);
+
+  const statusBuckets: FinancialStatusBucket[] = ["collected", "invoiced", "triggered", "pending"];
+  const revenueByStatus: RevenueByStatusEntry[] = statusBuckets.map((status) => {
+    const amount = milestones
+      .filter((m) => (status === "pending" ? m.status === "pending" || m.status === "overdue" : m.status === status))
+      .reduce((sum, m) => sum + Number(m.amount), 0);
+    return {
+      status,
+      label: status[0].toUpperCase() + status.slice(1),
+      amount,
+      pct: totalMilestoneValue > 0 ? round1((amount / totalMilestoneValue) * 100) : 0,
+    };
+  });
+
+  const everTriggered = milestones.filter((m) => m.triggered_at !== null);
+  const collectedWithin30 = everTriggered.filter(
+    (m) => m.status === "collected" && m.collected_at && daysBetweenIso(m.triggered_at as string, m.collected_at) <= 30
+  );
+  const collectionEfficiencyPct = everTriggered.length > 0 ? round1((collectedWithin30.length / everTriggered.length) * 100) : null;
+
+  const invoiceLagDays = milestones
+    .filter((m) => m.triggered_at && m.invoiced_at)
+    .map((m) => daysBetweenIso(m.triggered_at as string, m.invoiced_at as string));
+  const avgDaysToInvoice = invoiceLagDays.length > 0 ? round1(invoiceLagDays.reduce((s, v) => s + v, 0) / invoiceLagDays.length) : null;
+
+  const collectLagDays = milestones
+    .filter((m) => m.invoiced_at && m.collected_at)
+    .map((m) => daysBetweenIso(m.invoiced_at as string, m.collected_at as string));
+  const avgDaysToCollect = collectLagDays.length > 0 ? round1(collectLagDays.reduce((s, v) => s + v, 0) / collectLagDays.length) : null;
+
+  const collectedByClient = new Map<string, number>();
+  for (const m of milestones.filter((m) => m.status === "collected")) {
+    const clientId = engagementClientId.get(m.engagement_id);
+    if (!clientId) continue;
+    collectedByClient.set(clientId, (collectedByClient.get(clientId) ?? 0) + Number(m.amount));
+  }
+  const totalCollected = [...collectedByClient.values()].reduce((s, v) => s + v, 0);
+  const revenueConcentrationTop3: CollectedByClientEntry[] = [...collectedByClient.entries()]
+    .map(([clientId, collected]) => ({
+      clientId,
+      clientName: clientName.get(clientId) ?? "Unknown client",
+      collected,
+      pct: totalCollected > 0 ? round1((collected / totalCollected) * 100) : 0,
+    }))
+    .sort((a, b) => b.collected - a.collected)
+    .slice(0, 3);
+
+  const outstandingByClient = new Map<string, number>();
+  for (const m of milestones.filter((m) => m.status === "invoiced")) {
+    const clientId = engagementClientId.get(m.engagement_id);
+    if (!clientId) continue;
+    outstandingByClient.set(clientId, (outstandingByClient.get(clientId) ?? 0) + Number(m.amount));
+  }
+  const totalOutstanding = [...outstandingByClient.values()].reduce((s, v) => s + v, 0);
+  const outstandingReceivablesByClient: ReceivablesByClientEntry[] = [...outstandingByClient.entries()]
+    .map(([clientId, outstanding]) => ({
+      clientId,
+      clientName: clientName.get(clientId) ?? "Unknown client",
+      outstanding,
+      pct: totalOutstanding > 0 ? round1((outstanding / totalOutstanding) * 100) : 0,
+    }))
+    .sort((a, b) => b.outstanding - a.outstanding);
+
+  const now = new Date().toISOString();
+  const over14 = milestones.filter(
+    (m) => m.status === "triggered" && m.triggered_at && daysBetweenIso(m.triggered_at, now) > 14
+  );
+
+  return {
+    totalMilestoneValue,
+    revenueByStatus,
+    collectionEfficiencyPct,
+    avgDaysToInvoice,
+    avgDaysToCollect,
+    revenueConcentrationTop3,
+    outstandingReceivablesByClient,
+    triggeredNotInvoicedOver14Days: {
+      count: over14.length,
+      totalAmount: over14.reduce((sum, m) => sum + Number(m.amount), 0),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard summary — reuses one dataset load for org + every client detail
 // so the executive dashboard doesn't pay for N+1 separate fetches.
 // ---------------------------------------------------------------------------

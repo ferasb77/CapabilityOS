@@ -2,14 +2,15 @@ import { Globe2 } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { PortfolioIntelligence } from "@/features/intelligence/data";
+import type { FinancialIntelligence, PortfolioIntelligence } from "@/features/intelligence/data";
 import { generatePortfolioInsights } from "@/features/intelligence/insights";
 import { formatCurrency, formatPct, formatSatisfaction } from "@/features/intelligence/format";
 
 import { HorizontalBarChart } from "./bar-chart";
+import { FinancialIntelligenceSection } from "./financial-intelligence-section";
 import { InsightGrid } from "./insight-card";
 
-export function PortfolioIntelligenceView({ data }: { data: PortfolioIntelligence }) {
+export function PortfolioIntelligenceView({ data, financial }: { data: PortfolioIntelligence; financial: FinancialIntelligence }) {
   const insights = generatePortfolioInsights(data);
   const yearRowsDesc = [...data.serviceMixByYear].sort((a, b) => b.year - a.year);
   const revenueRowsDesc = [...data.revenueByYear].sort((a, b) => b.year - a.year);
@@ -199,6 +200,9 @@ export function PortfolioIntelligenceView({ data }: { data: PortfolioIntelligenc
           </CardContent>
         </Card>
       </div>
+
+      {/* Section 6 — Revenue and Financial Health */}
+      <FinancialIntelligenceSection data={financial} />
 
       {/* Insights */}
       <Card className="bg-surface-elevated">
