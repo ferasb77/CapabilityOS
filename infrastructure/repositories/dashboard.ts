@@ -100,6 +100,7 @@ export type PostDeliveryQueueItem = {
   label: string;
   count: number;
   navigationUrl: string;
+  detail?: string;
 };
 
 export type DashboardData = {
@@ -109,7 +110,7 @@ export type DashboardData = {
     upcomingExperiences: { count: number; thisWeek: number; laterThisMonth: number };
     participantsNext30Days: { total: number; confirmed: number; pending: number };
     facilitatorCoverage: { assigned: number; total: number; outstanding: number };
-    attentionRequired: { total: number; critical: number; followUp: number };
+    attentionRequired: { total: number; critical: number; upcomingRisk: number; followUp: number };
   };
   attentionBySeverity: {
     critical: AttentionItem[];
@@ -187,6 +188,10 @@ type CertificateRow = {
   participant_id: string;
   experience_id: string;
   revoked_at: string | null;
+};
+
+type CompletionCriteriaRow = {
+  experience_id: string;
 };
 
 type FacilitatorDirectoryRow = {
@@ -395,7 +400,7 @@ export async function getDashboardData(): Promise<DashboardData> {
   const materialsRelevantIds = [...new Set(upcoming90.map((e) => e.id))];
   const certificatesRelevantIds = [...new Set(recentlyCompleted90.map((e) => e.id))];
 
-  const [logisticsTasks, materials, certificates] = await Promise.all([
+  const [logisticsTasks, materials, certificates, completionCriteria] = await Promise.all([
     fetchScopedByIds<LogisticsTaskRow>(
       logisticsRelevantIds,
       (row) => row.workshop_id,
@@ -442,6 +447,21 @@ export async function getDashboardData(): Promise<DashboardData> {
           .eq("workspace_id", session.workspaceId)
           .range(from, to)
     ),
+    // "Certificates not yet issued" must only count experiences that have
+    // actually opted into the certificate workflow. Without this, every
+    // checked-in participant of every recently-completed experience reads
+    // as "eligible but uncertified" the moment nobody has configured
+    // completion criteria — which, platform-wide, is currently everyone
+    // (0 rows in experience_completion_criteria as of this fix), so the
+    // unfiltered count was pure noise, not a real backlog.
+    fetchScopedByIds<CompletionCriteriaRow>(
+      certificatesRelevantIds,
+      (row) => row.experience_id,
+      "experience_completion_criteria",
+      (from, to, ids) =>
+        supabase.from("experience_completion_criteria").select("experience_id").in("experience_id", ids).range(from, to),
+      (from, to) => supabase.from("experience_completion_criteria").select("experience_id").range(from, to)
+    ),
   ]);
 
   type LogisticsSummary = { total: number; complete: number; overdue: number };
@@ -465,6 +485,8 @@ export async function getDashboardData(): Promise<DashboardData> {
     bucket.add(cert.participant_id);
     liveCertificateParticipantIdsByExperienceId.set(cert.experience_id, bucket);
   }
+
+  const experienceIdsWithCompletionCriteria = new Set(completionCriteria.map((row) => row.experience_id));
 
   // ---------------------------------------------------------------------
   // SECTION 0 — greeting
@@ -802,6 +824,7 @@ export async function getDashboardData(): Promise<DashboardData> {
   let surveysNotSentCount = 0;
   let responseRateLowCount = 0;
   let certificatesOutstanding = 0;
+  const experiencesWithOutstandingCertificates = new Set<string>();
 
   for (const e of recentlyCompleted90) {
     const experienceParticipants = participantsBySlug.get(e.slug) ?? [];
@@ -817,10 +840,21 @@ export async function getDashboardData(): Promise<DashboardData> {
       if (responseRate < 0.6) responseRateLowCount += 1;
     }
 
-    const checkedInParticipants = experienceParticipants.filter((p) => p.checked_in);
-    const certifiedIds = liveCertificateParticipantIdsByExperienceId.get(e.id) ?? new Set<string>();
-    const uncertified = checkedInParticipants.filter((p) => !certifiedIds.has(p.id)).length;
-    certificatesOutstanding += uncertified;
+    // An experience only counts here if it has actually opted into the
+    // certificate workflow (a row in experience_completion_criteria).
+    // Without this gate, every checked-in participant of every
+    // recently-completed experience reads as "eligible but uncertified"
+    // the moment nobody has configured criteria — which, platform-wide, is
+    // every experience today — turning a real backlog metric into noise.
+    if (experienceIdsWithCompletionCriteria.has(e.id)) {
+      const checkedInParticipants = experienceParticipants.filter((p) => p.checked_in);
+      const certifiedIds = liveCertificateParticipantIdsByExperienceId.get(e.id) ?? new Set<string>();
+      const uncertified = checkedInParticipants.filter((p) => !certifiedIds.has(p.id)).length;
+      if (uncertified > 0) {
+        certificatesOutstanding += uncertified;
+        experiencesWithOutstandingCertificates.add(e.id);
+      }
+    }
   }
 
   let staleLogisticsCount = 0;
@@ -835,7 +869,13 @@ export async function getDashboardData(): Promise<DashboardData> {
   const postDeliveryQueue: PostDeliveryQueueItem[] = [
     { key: "surveys_not_sent", label: "Satisfaction surveys not sent", count: surveysNotSentCount, navigationUrl: "/dashboard/experiences" },
     { key: "response_rate_low", label: "Survey response rate below 60%", count: responseRateLowCount, navigationUrl: "/dashboard/experiences" },
-    { key: "certificates_outstanding", label: "Certificates not yet issued", count: certificatesOutstanding, navigationUrl: "/dashboard/experiences" },
+    {
+      key: "certificates_outstanding",
+      label: "Certificates pending issuance",
+      count: certificatesOutstanding,
+      navigationUrl: "/dashboard/experiences",
+      detail: `Across ${experiencesWithOutstandingCertificates.size} experience${experiencesWithOutstandingCertificates.size === 1 ? "" : "s"} with completion criteria configured`,
+    },
     { key: "stale_logistics", label: "Logistics tasks still open, event ended over a week ago", count: staleLogisticsCount, navigationUrl: "/dashboard/experiences" },
   ].filter((item) => item.count > 0);
 
@@ -854,10 +894,15 @@ export async function getDashboardData(): Promise<DashboardData> {
         total: facilitatorCoverageTotal,
         outstanding: facilitatorCoverageOutstanding,
       },
+      // Kept as three distinct tiers (not upcomingRisk folded into
+      // followUp) so this reconciles exactly with attentionBySeverity
+      // below and with the Attention Required panel's own tier counts —
+      // the two used to disagree on what "follow-up" meant.
       attentionRequired: {
         total: attentionTotal,
         critical: critical.length,
-        followUp: upcomingRisk.length + followUp.length,
+        upcomingRisk: upcomingRisk.length,
+        followUp: followUp.length,
       },
     },
     attentionBySeverity: { critical, upcomingRisk, followUp },

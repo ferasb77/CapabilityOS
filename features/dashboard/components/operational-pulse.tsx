@@ -21,9 +21,15 @@ export function OperationalPulse({ pulse }: { pulse: DashboardData["operationalP
       />
       <PulseCard
         icon={CalendarDays}
-        label="Upcoming Experiences"
+        label="Upcoming — Next 30 Days"
         value={upcomingExperiences.count}
-        subtext={`${upcomingExperiences.thisWeek} this week · ${upcomingExperiences.laterThisMonth} later this month`}
+        subtext={
+          <>
+            {upcomingExperiences.thisWeek} this week · {upcomingExperiences.laterThisMonth} later this month
+            <br />
+            View next 90 days below ↓
+          </>
+        }
       />
       <PulseCard
         icon={Users}
@@ -47,7 +53,7 @@ export function OperationalPulse({ pulse }: { pulse: DashboardData["operationalP
         label="Attention Required"
         value={attentionRequired.total}
         valueClassName={attentionRequired.critical > 0 ? "text-destructive" : "text-gold"}
-        subtext={`${attentionRequired.critical} critical · ${attentionRequired.followUp} follow-up`}
+        subtext={`${attentionRequired.critical} critical · ${attentionRequired.upcomingRisk} upcoming · ${attentionRequired.followUp} follow-up`}
       />
     </div>
   );

@@ -24,8 +24,11 @@ export function PostDeliveryQueuePanel({ items }: { items: DashboardData["postDe
                   href={item.navigationUrl}
                   className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-night/40 px-3 py-2 transition-colors hover:border-gold/40"
                 >
-                  <span className="text-sm text-ivory">{item.label}</span>
-                  <span className="text-sm font-semibold text-gold">{item.count}</span>
+                  <span className="min-w-0">
+                    <span className="block text-sm text-ivory">{item.label}</span>
+                    {item.detail && <span className="block text-xs text-muted-foreground">{item.detail}</span>}
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold text-gold">{item.count}</span>
                 </Link>
               </li>
             ))}

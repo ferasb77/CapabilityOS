@@ -37,11 +37,26 @@ export default async function DashboardPage() {
     followUp: [...data.attentionBySeverity.followUp, ...financialAttention.followUp],
   };
 
+  // getDashboardData()'s own attentionRequired count only knows about
+  // operational attention items — it has no visibility into the financial
+  // ones merged in above. Recomputed from the same merged list the
+  // Attention Required panel renders, so the pulse card's total is always
+  // exactly the number of items a user would count reading the list below.
+  const operationalPulse = {
+    ...data.operationalPulse,
+    attentionRequired: {
+      total: attentionBySeverity.critical.length + attentionBySeverity.upcomingRisk.length + attentionBySeverity.followUp.length,
+      critical: attentionBySeverity.critical.length,
+      upcomingRisk: attentionBySeverity.upcomingRisk.length,
+      followUp: attentionBySeverity.followUp.length,
+    },
+  };
+
   return (
     <div className="mx-auto max-w-7xl space-y-8">
       <DashboardGreetingHeader greeting={data.greeting} />
 
-      <OperationalPulse pulse={data.operationalPulse} />
+      <OperationalPulse pulse={operationalPulse} />
 
       <AttentionSection attentionBySeverity={attentionBySeverity} />
 
