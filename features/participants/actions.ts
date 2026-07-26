@@ -177,9 +177,7 @@ const CSV_HEADER = [
  * "use server" export in a file that a Client Component imports from
  * alongside other, non-action server-only functions.
  */
-export async function exportParticipants(
-  filters: ParticipantFilters & { search?: string }
-): Promise<string> {
+export async function exportParticipants(filters: ParticipantFilters): Promise<string> {
   const items = await fetchFilteredParticipants(filters);
 
   const rows = items.map((item) =>

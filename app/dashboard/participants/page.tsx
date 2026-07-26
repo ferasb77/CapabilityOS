@@ -13,7 +13,9 @@ type Props = {
     clientId?: string;
     checkinStatus?: string;
     surveyStatus?: string;
+    search?: string;
     page?: string;
+    pageSize?: string;
   }>;
 };
 
@@ -27,13 +29,16 @@ export default async function ParticipantsPage({ searchParams }: Props) {
     ? (params.surveyStatus as ParticipantSurveyStatus)
     : undefined;
   const page = params.page ? Number.parseInt(params.page, 10) || 1 : 1;
+  const pageSize = params.pageSize ? Number.parseInt(params.pageSize, 10) || undefined : undefined;
 
   const filters = {
     experienceId: params.experienceId || undefined,
     clientId: params.clientId || undefined,
     checkinStatus,
     surveyStatus,
+    search: params.search?.trim() || undefined,
     page,
+    pageSize,
   };
 
   const [result, experiences, clients] = await Promise.all([
@@ -63,6 +68,7 @@ export default async function ParticipantsPage({ searchParams }: Props) {
           clientId: filters.clientId,
           checkinStatus: filters.checkinStatus,
           surveyStatus: filters.surveyStatus,
+          search: filters.search,
         }}
       />
     </div>

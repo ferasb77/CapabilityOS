@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -84,6 +84,7 @@ type Props = {
     clientId?: string;
     checkinStatus?: CheckinFilter;
     surveyStatus?: ParticipantSurveyStatus;
+    search?: string;
   };
 };
 
@@ -98,18 +99,8 @@ export function ParticipantsView({
 }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(currentFilters.search ?? "");
   const [isExporting, setIsExporting] = useState(false);
-
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) {
-      return participants;
-    }
-    return participants.filter((participant) =>
-      [participant.fullName, participant.company ?? ""].join(" ").toLowerCase().includes(query)
-    );
-  }, [participants, search]);
 
   const availableExperiences = useMemo(() => {
     if (!currentFilters.clientId) {
@@ -118,34 +109,57 @@ export function ParticipantsView({
     return experiences.filter((experience) => experience.clientId === currentFilters.clientId);
   }, [experiences, currentFilters.clientId]);
 
-  function navigate(updates: Record<string, string | null>) {
-    const params = new URLSearchParams();
+  const navigate = useCallback(
+    (updates: Record<string, string | null>) => {
+      const params = new URLSearchParams();
 
-    const next = {
-      experienceId: currentFilters.experienceId ?? null,
-      clientId: currentFilters.clientId ?? null,
-      checkinStatus: currentFilters.checkinStatus ?? null,
-      surveyStatus: currentFilters.surveyStatus ?? null,
-      page: page > 1 ? String(page) : null,
-      ...updates,
-    };
+      const next = {
+        experienceId: currentFilters.experienceId ?? null,
+        clientId: currentFilters.clientId ?? null,
+        checkinStatus: currentFilters.checkinStatus ?? null,
+        surveyStatus: currentFilters.surveyStatus ?? null,
+        search: currentFilters.search ?? null,
+        page: page > 1 ? String(page) : null,
+        ...updates,
+      };
 
-    for (const [key, value] of Object.entries(next)) {
-      if (value) {
-        params.set(key, value);
+      for (const [key, value] of Object.entries(next)) {
+        if (value) {
+          params.set(key, value);
+        }
       }
+
+      const query = params.toString();
+      startTransition(() => {
+        router.push(query ? `/dashboard/participants?${query}` : "/dashboard/participants");
+      });
+    },
+    [currentFilters, page, router, startTransition]
+  );
+
+  // Search moves the current page's filter into the URL (server-side,
+  // just like the dropdown filters) instead of re-filtering whatever page
+  // is already loaded — so it now applies across every matching
+  // participant, not just the 25 already on screen. Debounced so it
+  // doesn't navigate on every keystroke.
+  useEffect(() => {
+    const trimmed = search.trim();
+    const current = currentFilters.search ?? "";
+    if (trimmed === current) {
+      return;
     }
 
-    const query = params.toString();
-    startTransition(() => {
-      router.push(query ? `/dashboard/participants?${query}` : "/dashboard/participants");
-    });
-  }
+    const handle = setTimeout(() => {
+      navigate({ search: trimmed || null, page: null });
+    }, 400);
+
+    return () => clearTimeout(handle);
+  }, [search, currentFilters.search, navigate]);
 
   async function handleExport() {
     setIsExporting(true);
     try {
-      const csv = await exportParticipants({ ...currentFilters, search });
+      const csv = await exportParticipants({ ...currentFilters, search: search.trim() || undefined });
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -279,11 +293,11 @@ export function ParticipantsView({
       </div>
 
       <p className="text-sm text-muted-foreground">
-        {totalCount} participant{totalCount === 1 ? "" : "s"} total
-        {search ? ` · ${filtered.length} matching "${search}" on this page` : ""}
+        {totalCount} participant{totalCount === 1 ? "" : "s"}
+        {search.trim() ? ` matching "${search.trim()}"` : " total"}
       </p>
 
-      {filtered.length === 0 ? (
+      {participants.length === 0 ? (
         <Card className="bg-surface-elevated">
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
             No participants match your filters.
@@ -307,7 +321,7 @@ export function ParticipantsView({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((participant) => (
+                  {participants.map((participant) => (
                     <TableRow key={participant.id}>
                       <TableCell className="font-medium">
                         <Link
@@ -354,7 +368,7 @@ export function ParticipantsView({
             </div>
 
             <ul className="space-y-3 md:hidden">
-              {filtered.map((participant) => (
+              {participants.map((participant) => (
                 <li
                   key={participant.id}
                   className="rounded-lg border border-border-subtle bg-night/40 p-3"
