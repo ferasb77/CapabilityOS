@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/infrastructure/supabase/server";
+import { toActionError } from "@/shared/errors/action-error";
 
 export type LoginState = {
   error: string;
@@ -24,7 +25,7 @@ export async function login(
 
   if (error) {
     return {
-      error: error.message,
+      error: toActionError(error, "auth"),
     };
   }
 

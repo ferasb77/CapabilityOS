@@ -101,6 +101,7 @@ export function ParticipantsView({
   const [, startTransition] = useTransition();
   const [search, setSearch] = useState(currentFilters.search ?? "");
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const availableExperiences = useMemo(() => {
     if (!currentFilters.clientId) {
@@ -158,9 +159,14 @@ export function ParticipantsView({
 
   async function handleExport() {
     setIsExporting(true);
+    setExportError(null);
     try {
-      const csv = await exportParticipants({ ...currentFilters, search: search.trim() || undefined });
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const result = await exportParticipants({ ...currentFilters, search: search.trim() || undefined });
+      if (!result.success) {
+        setExportError(result.error);
+        return;
+      }
+      const blob = new Blob([result.csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -186,15 +192,18 @@ export function ParticipantsView({
             />
           </div>
 
-          <Button
-            variant="outline"
-            onClick={handleExport}
-            disabled={isExporting}
-            className="w-full sm:w-auto"
-          >
-            <Download className="size-4" />
-            {isExporting ? "Exporting..." : "Export CSV"}
-          </Button>
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              variant="outline"
+              onClick={handleExport}
+              disabled={isExporting}
+              className="w-full sm:w-auto"
+            >
+              <Download className="size-4" />
+              {isExporting ? "Exporting..." : "Export CSV"}
+            </Button>
+            {exportError && <p className="max-w-60 text-right text-xs text-destructive">{exportError}</p>}
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-3">

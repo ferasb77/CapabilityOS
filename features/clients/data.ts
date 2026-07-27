@@ -1,6 +1,57 @@
 import { createClient } from "@/infrastructure/supabase/server";
 import type { ClientType } from "./schema";
 
+const MAX_FETCH_PAGE = 1000;
+const IN_FILTER_SAFE_LIMIT = 200;
+
+/** Supabase/PostgREST caps a plain `.select()` at 1000 rows by default —
+ * `participants`/`survey_responses` run into the thousands, so any query here
+ * that can plausibly exceed 1000 rows goes through this pager instead of
+ * risking a silent truncation. Mirrors infrastructure/repositories/dashboard.ts. */
+async function fetchAllRows<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const allRows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await buildQuery(from, from + MAX_FETCH_PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    allRows.push(...rows);
+    if (rows.length < MAX_FETCH_PAGE) break;
+    from += MAX_FETCH_PAGE;
+  }
+
+  return allRows;
+}
+
+/** Fetches rows scoped to a dynamic id/slug list via `.in()` — an `.in()`
+ * filter built from an unbounded list is the failure mode that crashed
+ * /dashboard/participants (request URL too long). Past IN_FILTER_SAFE_LIMIT
+ * entries, falls back to a paginated unfiltered fetch plus client-side
+ * filtering instead. Mirrors infrastructure/repositories/dashboard.ts. */
+async function fetchScopedByKey<T>(
+  keys: string[],
+  keyOf: (row: T) => string,
+  label: string,
+  queryWithIn: (from: number, to: number, keys: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  queryWithoutIn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  if (keys.length === 0) return [];
+
+  if (keys.length > IN_FILTER_SAFE_LIMIT) {
+    console.warn(
+      `[clients] ${label}: key list has ${keys.length} entries, over the ${IN_FILTER_SAFE_LIMIT}-item .in() safety limit — falling back to an unfiltered fetch with client-side filtering.`
+    );
+    const keySet = new Set(keys);
+    const allRows = await fetchAllRows<T>(queryWithoutIn);
+    return allRows.filter((row) => keySet.has(keyOf(row)));
+  }
+
+  return fetchAllRows<T>((from, to) => queryWithIn(from, to, keys));
+}
+
 // ---------------------------------------------------------------------------
 // Directory summary
 // ---------------------------------------------------------------------------
@@ -215,27 +266,33 @@ export async function getClientRelationshipHistory(clientId: string): Promise<Cl
   const experienceIds = experiences.map((row) => row.id);
   const slugs = experiences.map((row) => row.slug);
 
-  const [{ data: participantRows, error: participantsError }, { data: responseRows, error: responsesError }] =
-    await Promise.all([
-      supabase.from("participants").select("id").in("workshop_slug", slugs),
-      supabase
-        .from("survey_responses")
-        .select("overall_rating")
-        .in("workshop_id", experienceIds)
-        .eq("survey_type", "satisfaction"),
-    ]);
-
-  if (participantsError) {
-    throw new Error(participantsError.message);
-  }
-
-  if (responsesError) {
-    throw new Error(responsesError.message);
-  }
+  const [participantRows, responseRows] = await Promise.all([
+    fetchScopedByKey<{ id: string; workshop_slug: string }>(
+      slugs,
+      (row) => row.workshop_slug,
+      "getClientRelationshipHistory participants",
+      (from, to, keys) => supabase.from("participants").select("id, workshop_slug").in("workshop_slug", keys).range(from, to),
+      (from, to) => supabase.from("participants").select("id, workshop_slug").range(from, to)
+    ),
+    fetchScopedByKey<{ overall_rating: number | null; workshop_id: string }>(
+      experienceIds,
+      (row) => row.workshop_id,
+      "getClientRelationshipHistory survey_responses",
+      (from, to, keys) =>
+        supabase
+          .from("survey_responses")
+          .select("overall_rating, workshop_id")
+          .in("workshop_id", keys)
+          .eq("survey_type", "satisfaction")
+          .range(from, to),
+      (from, to) =>
+        supabase.from("survey_responses").select("overall_rating, workshop_id").eq("survey_type", "satisfaction").range(from, to)
+    ),
+  ]);
 
   return {
     totalExperiences: experiences.length,
-    totalParticipants: (participantRows ?? []).length,
-    averageSatisfaction: average((responseRows ?? []).map((row) => row.overall_rating as number)),
+    totalParticipants: participantRows.length,
+    averageSatisfaction: average(responseRows.map((row) => row.overall_rating as number)),
   };
 }

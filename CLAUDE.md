@@ -17,7 +17,7 @@ so that professionals can spend their attention on decisions that matter, not on
 The repo is named `workshopOS`. The platform is named **CapabilityOS**.
 Use `CapabilityOS` in all new code, copy, and documentation.
 
-**Live URL:** https://workshopos.enablemygrowth.com
+**Live URL:** https://capabilityos.enablemygrowth.com
 **Stack:** Next.js 16 · React 19 · Supabase (auth + DB + storage) · Tailwind v4 · shadcn/ui · Zod · TypeScript
 **Deployed on:** Render
 

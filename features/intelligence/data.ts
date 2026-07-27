@@ -1,3 +1,5 @@
+import { cache } from "react";
+
 import { createClient } from "@/infrastructure/supabase/server";
 
 // ---------------------------------------------------------------------------
@@ -121,6 +123,10 @@ export type OrganizationIntelligence = {
   clientSummaries: ClientSummaryLite[];
   facilitatorSummaries: FacilitatorSummaryLite[];
   totalExperiences: number;
+  /** Satisfaction responses submitted via a custom survey template, not
+   * reflected in satisfactionThisYear/satisfactionLastYear/yearlyTrend or
+   * any other average here — see RawDataset.excludedResponseCount. */
+  excludedResponseCount: number;
 };
 
 export type ClientComparisonRow = {
@@ -351,6 +357,9 @@ type RawDataset = {
   participantCountBySlug: Map<string, number>;
   responsesByExperienceId: Map<string, number[]>;
   dimensionResponses: DimensionResponseRow[];
+  /** Satisfaction survey responses submitted via a custom template — not
+   * reflected in any average below. See loadDataset's comment. */
+  excludedResponseCount: number;
 };
 
 /** Supabase/PostgREST caps a plain `.select()` at 1000 rows by default —
@@ -378,7 +387,15 @@ async function fetchAllRows<T>(
   return allRows;
 }
 
-async function loadDataset(workspaceId?: string): Promise<RawDataset> {
+// Every getXIntelligence function below calls this, and buildAssistantContext
+// (features/intelligence/assistant-context.ts) calls several of them plus
+// getClientDetailIntelligence/getFacilitatorDetailIntelligence once per
+// client/facilitator — 20+ calls in a single render of /dashboard/intelligence
+// or /dashboard/intelligence/ask. Each call re-fetches every paginated table
+// (participants alone is 8,000+ rows) from scratch, which was slow enough to
+// intermittently 503 that route. `cache()` memoizes per request (keyed on the
+// workspaceId argument), so all of those collapse into one real fetch.
+const loadDataset = cache(async function loadDataset(workspaceId?: string): Promise<RawDataset> {
   const supabase = await createClient();
 
   const [clients, facilitators] = await Promise.all([
@@ -448,17 +465,38 @@ async function loadDataset(workspaceId?: string): Promise<RawDataset> {
 
   const responsesByExperienceId = new Map<string, number[]>();
   const dimensionResponses: DimensionResponseRow[] = [];
+  // A null overall_rating means this response was submitted against a
+  // custom survey template (its answers live in survey_answers, not the
+  // legacy rating columns — see Sprint 17's comment on getExperienceSurveyResults).
+  // Every average below is built from these dimension columns only, so a
+  // custom-template response is invisible to it; counting the exclusions
+  // here is what lets computeOrgIntelligence surface that honestly instead
+  // of silently under-representing satisfaction data (CLAUDE.md's
+  // Intelligence Assistant Rule: never present partial data as complete).
+  let excludedResponseCount = 0;
   for (const row of responseRows) {
     if (!experienceIds.has(row.workshop_id)) continue;
     dimensionResponses.push(row);
-    if (row.overall_rating === null) continue;
+    if (row.overall_rating === null) {
+      excludedResponseCount++;
+      continue;
+    }
     const bucket = responsesByExperienceId.get(row.workshop_id) ?? [];
     bucket.push(row.overall_rating);
     responsesByExperienceId.set(row.workshop_id, bucket);
   }
 
-  return { clients, engagements, experiences, facilitators, participantCountBySlug, responsesByExperienceId, dimensionResponses };
-}
+  return {
+    clients,
+    engagements,
+    experiences,
+    facilitators,
+    participantCountBySlug,
+    responsesByExperienceId,
+    dimensionResponses,
+    excludedResponseCount,
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Small numeric helpers
@@ -833,6 +871,7 @@ function computeOrgIntelligence(dataset: RawDataset): OrganizationIntelligence {
     clientSummaries,
     facilitatorSummaries,
     totalExperiences: experiences.length,
+    excludedResponseCount: dataset.excludedResponseCount,
   };
 }
 
@@ -1935,15 +1974,16 @@ export async function getFinancialIntelligence(workspaceId: string): Promise<Fin
   const dataset = await loadDataset(workspaceId);
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("payment_milestones")
-    .select("engagement_id, amount, status, triggered_at, invoiced_at, collected_at")
-    .eq("workspace_id", workspaceId)
-    .is("deleted_at", null);
+  const data = await fetchAllRows<FinancialMilestoneRow>((from, to) =>
+    supabase
+      .from("payment_milestones")
+      .select("engagement_id, amount, status, triggered_at, invoiced_at, collected_at")
+      .eq("workspace_id", workspaceId)
+      .is("deleted_at", null)
+      .range(from, to)
+  );
 
-  if (error) throw new Error(error.message);
-
-  const milestones = (data ?? []) as FinancialMilestoneRow[];
+  const milestones = data;
 
   const engagementClientId = new Map(dataset.engagements.map((e) => [e.id, e.client_id]));
   const clientName = new Map(dataset.clients.map((c) => [c.id, c.name]));

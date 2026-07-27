@@ -21,7 +21,7 @@ export function FacilitatorCapacityPanel({ capacity }: { capacity: DashboardData
         <p className="text-sm text-muted-foreground">Next 30 days</p>
       </CardHeader>
       <CardContent className="flex-1 space-y-4">
-        <div className="grid grid-cols-3 gap-3 text-center">
+        <div className="grid grid-cols-3 gap-2 text-center sm:gap-3">
           <div>
             <p className="text-xl font-semibold text-gold">{capacity.totalUpcoming}</p>
             <p className="text-xs text-muted-foreground">Experiences</p>

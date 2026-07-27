@@ -233,7 +233,7 @@ type PulseMilestoneRow = {
   engagements: { title: string; client_id: string; status: string; clients: { name: string } | null } | null;
 };
 
-type EngagementValueRow = { id: string; status: string; contract_value: number | string | null };
+type EngagementValueRow = { id: string; status: string; contract_value: number | string | null; currency: string | null };
 
 async function loadWorkspaceMilestones(workspaceId: string): Promise<PulseMilestoneRow[]> {
   const supabase = await createClient();
@@ -271,6 +271,14 @@ export type FinancialPulse = {
   collectedThisYear: number;
   invoicedAwaitingPayment: number;
   triggeredNotInvoiced: number;
+  /** Every headline total above is summed within this currency only — see
+   * the comment on getFinancialPulse for why. */
+  primaryCurrency: string;
+  /** True when at least one engagement/milestone uses a different currency
+   * than primaryCurrency, meaning the headline totals above don't reflect
+   * 100% of activity. The UI should surface this rather than silently
+   * showing an incomplete number as if it were the whole picture. */
+  hasOtherCurrencies: boolean;
   recentActivity: RecentMilestoneActivity[];
 };
 
@@ -278,33 +286,61 @@ function engagementUrl(clientId: string, engagementId: string): string {
   return `/dashboard/clients/${clientId}/engagements/${engagementId}?tab=financial`;
 }
 
+/**
+ * Milestones and engagements each carry their own `currency` (schema
+ * supports USD/SAR/AED/QAR/EUR/GBP — see MILESTONE_CURRENCIES). Naively
+ * summing `amount`/`contract_value` across rows with different currencies
+ * would silently add e.g. SAR to USD as if they were equal, producing a
+ * meaningless blended total. Every workspace's data happens to be
+ * single-currency today, which is exactly why this bug was invisible —
+ * so instead of trusting that to stay true, every total below is scoped to
+ * the workspace's default currency, and `hasOtherCurrencies` tells the UI
+ * when that scoping means some activity isn't reflected in the number.
+ */
 export async function getFinancialPulse(workspaceId: string): Promise<FinancialPulse> {
   const supabase = await createClient();
   const currentYear = new Date().getUTCFullYear();
 
-  const [milestones, engagementRows] = await Promise.all([
+  const [milestones, engagementRows, financeSettings] = await Promise.all([
     loadWorkspaceMilestones(workspaceId),
     supabase
       .from("engagements")
-      .select("id, status, contract_value")
+      .select("id, status, contract_value, currency")
       .eq("workspace_id", workspaceId)
       .is("deleted_at", null)
       .then(({ data, error }) => {
         if (error) throw new Error(error.message);
         return (data ?? []) as EngagementValueRow[];
       }),
+    getFinanceSettings(workspaceId),
   ]);
 
+  const primaryCurrency = financeSettings.defaultCurrency;
+
+  const hasOtherCurrencies =
+    engagementRows.some((e) => e.currency && e.currency !== primaryCurrency) ||
+    milestones.some((m) => m.currency !== primaryCurrency);
+
   const totalActiveContractValue = engagementRows
-    .filter((e) => e.status === "active")
+    .filter((e) => e.status === "active" && (e.currency ?? primaryCurrency) === primaryCurrency)
     .reduce((sum, e) => sum + Number(e.contract_value ?? 0), 0);
 
   const collectedThisYear = milestones
-    .filter((m) => m.status === "collected" && m.collected_at && new Date(m.collected_at).getUTCFullYear() === currentYear)
+    .filter(
+      (m) =>
+        m.status === "collected" &&
+        m.collected_at &&
+        new Date(m.collected_at).getUTCFullYear() === currentYear &&
+        m.currency === primaryCurrency
+    )
     .reduce((sum, m) => sum + Number(m.amount), 0);
 
-  const invoicedAwaitingPayment = milestones.filter((m) => m.status === "invoiced").reduce((sum, m) => sum + Number(m.amount), 0);
-  const triggeredNotInvoiced = milestones.filter((m) => m.status === "triggered").reduce((sum, m) => sum + Number(m.amount), 0);
+  const invoicedAwaitingPayment = milestones
+    .filter((m) => m.status === "invoiced" && m.currency === primaryCurrency)
+    .reduce((sum, m) => sum + Number(m.amount), 0);
+  const triggeredNotInvoiced = milestones
+    .filter((m) => m.status === "triggered" && m.currency === primaryCurrency)
+    .reduce((sum, m) => sum + Number(m.amount), 0);
 
   const recentActivity: RecentMilestoneActivity[] = milestones
     .filter((m) => m.status === "triggered" || m.status === "invoiced")
@@ -324,7 +360,15 @@ export async function getFinancialPulse(workspaceId: string): Promise<FinancialP
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 5);
 
-  return { totalActiveContractValue, collectedThisYear, invoicedAwaitingPayment, triggeredNotInvoiced, recentActivity };
+  return {
+    totalActiveContractValue,
+    collectedThisYear,
+    invoicedAwaitingPayment,
+    triggeredNotInvoiced,
+    primaryCurrency,
+    hasOtherCurrencies,
+    recentActivity,
+  };
 }
 
 // ---------------------------------------------------------------------------

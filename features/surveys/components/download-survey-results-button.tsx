@@ -14,12 +14,18 @@ type Props = {
 
 export function DownloadSurveyResultsButton({ experienceId, experienceSlug }: Props) {
   const [isExporting, setIsExporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleDownload() {
     setIsExporting(true);
+    setError(null);
     try {
-      const csv = await downloadSurveyResults(experienceId);
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const result = await downloadSurveyResults(experienceId);
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      const blob = new Blob([result.csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -32,9 +38,12 @@ export function DownloadSurveyResultsButton({ experienceId, experienceSlug }: Pr
   }
 
   return (
-    <Button type="button" variant="outline" onClick={handleDownload} disabled={isExporting}>
-      <Download className="size-4" />
-      {isExporting ? "Exporting..." : "Download Results CSV"}
-    </Button>
+    <div className="flex flex-col items-end gap-1">
+      <Button type="button" variant="outline" onClick={handleDownload} disabled={isExporting}>
+        <Download className="size-4" />
+        {isExporting ? "Exporting..." : "Download Results CSV"}
+      </Button>
+      {error && <p className="max-w-60 text-right text-xs text-destructive">{error}</p>}
+    </div>
   );
 }

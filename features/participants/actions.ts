@@ -9,6 +9,7 @@ import { maybeAutoIssueCertificate } from "@/features/certificates/actions";
 import { sendPreTrainingSurveyOnRegistration } from "@/features/surveys/actions";
 import { createOrGetMaterialToken } from "@/features/materials/actions";
 import { requireEnv } from "@/infrastructure/env";
+import { toActionError } from "@/shared/errors/action-error";
 
 export async function checkInParticipant(
   _: CheckInResult | null,
@@ -198,25 +199,31 @@ const CSV_HEADER = [
  * "use server" export in a file that a Client Component imports from
  * alongside other, non-action server-only functions.
  */
-export async function exportParticipants(filters: ParticipantFilters): Promise<string> {
-  const items = await fetchFilteredParticipants(filters);
+export type ExportParticipantsResult = { success: true; csv: string } | { success: false; error: string };
 
-  const rows = items.map((item) =>
-    csvRow([
-      item.firstName,
-      item.lastName,
-      item.email,
-      item.mobile,
-      item.company ?? "",
-      item.jobTitle ?? "",
-      item.experienceTitle ?? "",
-      item.clientName ?? "",
-      item.checkedIn ? "Yes" : "No",
-      formatCsvDateTime(item.checkedInAt),
-      SURVEY_STATUS_LABEL[item.surveyStatus],
-      formatCsvDateTime(item.registeredAt),
-    ])
-  );
+export async function exportParticipants(filters: ParticipantFilters): Promise<ExportParticipantsResult> {
+  try {
+    const items = await fetchFilteredParticipants(filters);
 
-  return [csvRow(CSV_HEADER), ...rows].join("\r\n");
+    const rows = items.map((item) =>
+      csvRow([
+        item.firstName,
+        item.lastName,
+        item.email,
+        item.mobile,
+        item.company ?? "",
+        item.jobTitle ?? "",
+        item.experienceTitle ?? "",
+        item.clientName ?? "",
+        item.checkedIn ? "Yes" : "No",
+        formatCsvDateTime(item.checkedInAt),
+        SURVEY_STATUS_LABEL[item.surveyStatus],
+        formatCsvDateTime(item.registeredAt),
+      ])
+    );
+
+    return { success: true, csv: [csvRow(CSV_HEADER), ...rows].join("\r\n") };
+  } catch (error) {
+    return { success: false, error: toActionError(error, "participants", "Unable to export participants.") };
+  }
 }

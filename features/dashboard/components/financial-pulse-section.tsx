@@ -22,9 +22,17 @@ export function FinancialPulseSection({ pulse }: { pulse: FinancialPulse }) {
     <Card className="bg-surface-elevated">
       <CardHeader>
         <CardTitle>Financial Pulse</CardTitle>
-        <CardDescription>Contract value, collections, and receivables across active engagements.</CardDescription>
+        <CardDescription>
+          Contract value, collections, and receivables across active engagements, in {pulse.primaryCurrency}.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {pulse.hasOtherCurrencies && (
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            Some engagements or milestones use a different currency and aren&apos;t included in the totals below — figures
+            here only cover {pulse.primaryCurrency} activity.
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <PulseCard
             icon={Wallet}

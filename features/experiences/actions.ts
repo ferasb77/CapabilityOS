@@ -9,6 +9,7 @@ import { sendPostTrainingSurveysOnCompletion } from "@/features/surveys/actions"
 import { triggerExperienceCompletionMilestones } from "@/features/financial/actions";
 
 import { createExperienceSchema, updateExperienceSchema, EXPERIENCE_STATUS_TRANSITIONS } from "./schema";
+import { toActionError } from "@/shared/errors/action-error";
 
 export type ExperienceFormValues = Record<string, string>;
 
@@ -219,7 +220,7 @@ export async function updateExperience(
     .maybeSingle();
 
   if (fetchError) {
-    return { success: false, error: fetchError.message, values };
+    return { success: false, error: toActionError(fetchError, "experiences"), values };
   }
 
   if (!existing) {
@@ -339,7 +340,7 @@ export async function deleteExperience(experienceId: string): Promise<DeleteExpe
     .maybeSingle();
 
   if (fetchError) {
-    return { success: false, error: fetchError.message };
+    return { success: false, error: toActionError(fetchError, "experiences") };
   }
 
   if (!existing) {
@@ -356,7 +357,7 @@ export async function deleteExperience(experienceId: string): Promise<DeleteExpe
     .eq("id", experienceId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "experiences") };
   }
 
   revalidatePath("/dashboard");
@@ -382,7 +383,7 @@ export async function updateLogisticsTask(
     .eq("id", taskId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "experiences") };
   }
 
   revalidatePath(`/dashboard/experiences/${experienceSlug}`);

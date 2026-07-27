@@ -12,6 +12,7 @@ import { createServiceRoleClient } from "@/infrastructure/supabase/service-role"
 
 import { getExperienceCertificates } from "./data";
 import { generateCertificateFromUpload, generateCertificatePdf } from "./pdf";
+import { toActionError } from "@/shared/errors/action-error";
 import {
   certificateTemplateSchema,
   completionCriteriaSchema,
@@ -83,13 +84,13 @@ export async function issueCertificate(participantId: string, experienceId: stri
     ]);
 
   if (experienceError) {
-    return { success: false, error: experienceError.message };
+    return { success: false, error: toActionError(experienceError, "certificates") };
   }
   if (!experience) {
     return { success: false, error: "Experience not found." };
   }
   if (participantError) {
-    return { success: false, error: participantError.message };
+    return { success: false, error: toActionError(participantError, "certificates") };
   }
   if (!participant) {
     return { success: false, error: "Participant not found." };
@@ -119,7 +120,7 @@ export async function issueCertificate(participantId: string, experienceId: stri
     ]);
 
   if (existingError) {
-    return { success: false, error: existingError.message };
+    return { success: false, error: toActionError(existingError, "certificates") };
   }
   if (existingCertificate) {
     return { success: false, error: "A certificate has already been issued for this participant." };
@@ -143,7 +144,7 @@ export async function issueCertificate(participantId: string, experienceId: stri
   const { data: template, error: templateError } = await resolveTemplate(supabase, criteria.certificate_template_id);
 
   if (templateError) {
-    return { success: false, error: templateError.message };
+    return { success: false, error: toActionError(templateError, "certificates") };
   }
   if (!template) {
     return { success: false, error: "No certificate template is configured. Set one up in Settings first." };
@@ -177,7 +178,7 @@ export async function issueCertificate(participantId: string, experienceId: stri
     .single();
 
   if (insertError || !inserted) {
-    return { success: false, error: insertError?.message ?? "Unable to create certificate record." };
+    return { success: false, error: toActionError(insertError, "certificates", "Unable to create certificate record.") };
   }
 
   try {
@@ -290,8 +291,17 @@ export async function maybeAutoIssueCertificate(participantId: string, experienc
 
 export type EmailCertificateResult = { success: true } | { success: false; error: string };
 
+/**
+ * Uses the service-role client, not the cookie-bound one: this is called
+ * both from the authenticated dashboard and, via maybeAutoIssueCertificate,
+ * from the anonymous public check-in/survey flows. It happened to also work
+ * under the session-bound client because of the "Public can verify
+ * certificates" anon SELECT policy (unrevoked rows only) — but relying on
+ * that incidental grant for a write-adjacent action is fragile, so this
+ * matches issueCertificate's explicit service-role usage instead.
+ */
 export async function emailCertificate(certificateId: string): Promise<EmailCertificateResult> {
-  const supabase = await createClient();
+  const supabase = createServiceRoleClient();
 
   const { data: certificate, error } = await supabase
     .from("certificates")
@@ -300,7 +310,7 @@ export async function emailCertificate(certificateId: string): Promise<EmailCert
     .maybeSingle();
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
   if (!certificate) {
     return { success: false, error: "Certificate not found." };
@@ -348,7 +358,7 @@ export async function emailCertificate(certificateId: string): Promise<EmailCert
     });
 
     if (sendError) {
-      return { success: false, error: sendError.message };
+      return { success: false, error: toActionError(sendError, "certificates") };
     }
   } catch (sendError) {
     return {
@@ -363,7 +373,7 @@ export async function emailCertificate(certificateId: string): Promise<EmailCert
     .eq("id", certificateId);
 
   if (updateError) {
-    return { success: false, error: updateError.message };
+    return { success: false, error: toActionError(updateError, "certificates") };
   }
 
   const { data: experienceRow } = await supabase
@@ -395,7 +405,7 @@ export async function revokeCertificate(certificateId: string, reason: string): 
     .maybeSingle();
 
   if (fetchError) {
-    return { success: false, error: fetchError.message };
+    return { success: false, error: toActionError(fetchError, "certificates") };
   }
   if (!certificate) {
     return { success: false, error: "Certificate not found." };
@@ -407,7 +417,7 @@ export async function revokeCertificate(certificateId: string, reason: string): 
     .eq("id", certificateId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
 
   const { data: experienceRow } = await supabase
@@ -448,7 +458,7 @@ export async function saveCompletionCriteria(
     .maybeSingle();
 
   if (experienceError) {
-    return { success: false, error: experienceError.message };
+    return { success: false, error: toActionError(experienceError, "certificates") };
   }
   if (!experience) {
     return { success: false, error: "Experience not found." };
@@ -468,7 +478,7 @@ export async function saveCompletionCriteria(
   );
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
 
   revalidatePath(`/dashboard/experiences/${experience.slug}`);
@@ -539,7 +549,7 @@ export async function createCertificateTemplate(
     .single();
 
   if (error || !inserted) {
-    return { success: false, error: error?.message ?? "Unable to create template." };
+    return { success: false, error: toActionError(error, "certificates", "Unable to create template.") };
   }
 
   revalidatePath("/dashboard/settings/certificates");
@@ -582,7 +592,7 @@ export async function updateCertificateTemplate(
     .eq("id", templateId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
 
   revalidatePath("/dashboard/settings/certificates");
@@ -601,13 +611,13 @@ export async function setDefaultTemplate(templateId: string, workspaceId: string
     .neq("id", templateId);
 
   if (clearError) {
-    return { success: false, error: clearError.message };
+    return { success: false, error: toActionError(clearError, "certificates") };
   }
 
   const { error } = await supabase.from("certificate_templates").update({ is_default: true }).eq("id", templateId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
 
   revalidatePath("/dashboard/settings/certificates");
@@ -633,7 +643,7 @@ export async function previewCertificateTemplate(templateId: string): Promise<Pr
     .maybeSingle();
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
   if (!template) {
     return { success: false, error: "Template not found." };
@@ -706,7 +716,7 @@ export async function setCertificateTemplateType(
     .eq("id", templateId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
 
   revalidatePath(`/dashboard/settings/certificates/${templateId}/edit`);
@@ -750,7 +760,7 @@ export async function updateUploadedTemplateBasics(
     .eq("id", templateId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
 
   revalidatePath(`/dashboard/settings/certificates/${templateId}/edit`);
@@ -822,7 +832,7 @@ export async function uploadCertificateTemplatePdf(
     .eq("id", templateId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
 
   revalidatePath(`/dashboard/settings/certificates/${templateId}/edit`);
@@ -850,7 +860,7 @@ export async function getUploadedTemplatePreviewUrl(templateId: string): Promise
     .maybeSingle();
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
   if (!template?.uploaded_pdf_path) {
     return { success: false, error: "No PDF has been uploaded for this template yet." };
@@ -887,7 +897,7 @@ export async function updateFieldPlacements(
     .eq("id", templateId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "certificates") };
   }
 
   revalidatePath(`/dashboard/settings/certificates/${templateId}/edit`);

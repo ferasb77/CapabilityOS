@@ -28,6 +28,34 @@ async function fetchAllRows<T>(
   return allRows;
 }
 
+const IN_FILTER_SAFE_LIMIT = 200;
+
+/** Fetches rows scoped to a dynamic key list via `.in()` — an `.in()` filter
+ * built from an unbounded list is the failure mode that crashed
+ * /dashboard/participants (request URL too long). Past IN_FILTER_SAFE_LIMIT
+ * entries, falls back to a paginated unfiltered fetch plus client-side
+ * filtering instead. Mirrors infrastructure/repositories/dashboard.ts. */
+async function fetchScopedByKey<T>(
+  keys: string[],
+  keyOf: (row: T) => string,
+  label: string,
+  queryWithIn: (from: number, to: number, keys: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  queryWithoutIn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  if (keys.length === 0) return [];
+
+  if (keys.length > IN_FILTER_SAFE_LIMIT) {
+    console.warn(
+      `[facilitators] ${label}: key list has ${keys.length} entries, over the ${IN_FILTER_SAFE_LIMIT}-item .in() safety limit — falling back to an unfiltered fetch with client-side filtering.`
+    );
+    const keySet = new Set(keys);
+    const allRows = await fetchAllRows<T>(queryWithoutIn);
+    return allRows.filter((row) => keySet.has(keyOf(row)));
+  }
+
+  return fetchAllRows<T>((from, to) => queryWithIn(from, to, keys));
+}
+
 // ---------------------------------------------------------------------------
 // Directory summary
 // ---------------------------------------------------------------------------
@@ -89,7 +117,9 @@ export async function getAllFacilitators(): Promise<FacilitatorSummary[]> {
       .select("id, facilitator_email")
       .not("facilitator_email", "is", null)
       .is("deleted_at", null),
-    supabase.from("survey_responses").select("workshop_id, overall_rating").eq("survey_type", "satisfaction"),
+    fetchAllRows<{ workshop_id: string; overall_rating: number }>((from, to) =>
+      supabase.from("survey_responses").select("workshop_id, overall_rating").eq("survey_type", "satisfaction").range(from, to)
+    ),
   ]);
 
   if (facilitatorsResult.error) {
@@ -100,12 +130,8 @@ export async function getAllFacilitators(): Promise<FacilitatorSummary[]> {
     throw new Error(workshopsResult.error.message);
   }
 
-  if (responsesResult.error) {
-    throw new Error(responsesResult.error.message);
-  }
-
   const ratingsByWorkshopId = new Map<string, number[]>();
-  for (const row of responsesResult.data ?? []) {
+  for (const row of responsesResult) {
     const bucket = ratingsByWorkshopId.get(row.workshop_id) ?? [];
     bucket.push(row.overall_rating);
     ratingsByWorkshopId.set(row.workshop_id, bucket);
@@ -311,25 +337,32 @@ export async function getFacilitatorDeliveryHistory(
   const workshopIds = matched.map((row) => row.id);
   const slugs = matched.map((row) => row.slug);
 
-  const [participantsResult, responsesResult] = await Promise.all([
-    supabase.from("participants").select("workshop_slug").in("workshop_slug", slugs),
-    supabase
-      .from("survey_responses")
-      .select("workshop_id, overall_rating")
-      .in("workshop_id", workshopIds)
-      .eq("survey_type", "satisfaction"),
+  const [participantRows, responseRows] = await Promise.all([
+    fetchScopedByKey<{ workshop_slug: string }>(
+      slugs,
+      (row) => row.workshop_slug,
+      "getFacilitatorDeliveryHistory participants",
+      (from, to, keys) => supabase.from("participants").select("workshop_slug").in("workshop_slug", keys).range(from, to),
+      (from, to) => supabase.from("participants").select("workshop_slug").range(from, to)
+    ),
+    fetchScopedByKey<{ workshop_id: string; overall_rating: number }>(
+      workshopIds,
+      (row) => row.workshop_id,
+      "getFacilitatorDeliveryHistory survey_responses",
+      (from, to, keys) =>
+        supabase
+          .from("survey_responses")
+          .select("workshop_id, overall_rating")
+          .in("workshop_id", keys)
+          .eq("survey_type", "satisfaction")
+          .range(from, to),
+      (from, to) =>
+        supabase.from("survey_responses").select("workshop_id, overall_rating").eq("survey_type", "satisfaction").range(from, to)
+    ),
   ]);
 
-  if (participantsResult.error) {
-    throw new Error(participantsResult.error.message);
-  }
-
-  if (responsesResult.error) {
-    throw new Error(responsesResult.error.message);
-  }
-
   const participantCountBySlug = new Map<string, number>();
-  for (const row of participantsResult.data ?? []) {
+  for (const row of participantRows) {
     participantCountBySlug.set(
       row.workshop_slug,
       (participantCountBySlug.get(row.workshop_slug) ?? 0) + 1
@@ -337,7 +370,7 @@ export async function getFacilitatorDeliveryHistory(
   }
 
   const ratingsByWorkshopId = new Map<string, number[]>();
-  for (const row of responsesResult.data ?? []) {
+  for (const row of responseRows) {
     const bucket = ratingsByWorkshopId.get(row.workshop_id) ?? [];
     bucket.push(row.overall_rating);
     ratingsByWorkshopId.set(row.workshop_id, bucket);

@@ -2,6 +2,30 @@ import { createClient } from "@/infrastructure/supabase/server";
 import type { ExperienceStatus } from "@/infrastructure/repositories/dashboard";
 import type { ExperienceType } from "./schema";
 
+const MAX_FETCH_PAGE = 1000;
+
+/** Supabase/PostgREST caps a plain `.select()` at 1000 rows by default —
+ * `participants` runs into the thousands, so any org-wide fetch here goes
+ * through this pager instead of risking a silent truncation. Mirrors
+ * infrastructure/repositories/dashboard.ts. */
+async function fetchAllRows<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const allRows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await buildQuery(from, from + MAX_FETCH_PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    allRows.push(...rows);
+    if (rows.length < MAX_FETCH_PAGE) break;
+    from += MAX_FETCH_PAGE;
+  }
+
+  return allRows;
+}
+
 // ---------------------------------------------------------------------------
 // Options (for select/filter dropdowns elsewhere in the app)
 // ---------------------------------------------------------------------------
@@ -250,29 +274,26 @@ type ExperienceListRow = {
 export async function getAllExperiences(): Promise<ExperienceListItem[]> {
   const supabase = await createClient();
 
-  const [{ data: experienceRows, error: experiencesError }, { data: participantRows, error: participantsError }] =
-    await Promise.all([
-      supabase
-        .from("experiences")
-        .select(
-          "id, slug, title, experience_type, status, start_date, end_date, venue, capacity, clients(name), engagements(title)"
-        )
-        .is("deleted_at", null)
-        .order("start_date", { ascending: false }),
-      supabase.from("participants").select("workshop_slug, checked_in"),
-    ]);
+  const [{ data: experienceRows, error: experiencesError }, participantRows] = await Promise.all([
+    supabase
+      .from("experiences")
+      .select(
+        "id, slug, title, experience_type, status, start_date, end_date, venue, capacity, clients(name), engagements(title)"
+      )
+      .is("deleted_at", null)
+      .order("start_date", { ascending: false }),
+    fetchAllRows<{ workshop_slug: string; checked_in: boolean }>((from, to) =>
+      supabase.from("participants").select("workshop_slug, checked_in").range(from, to)
+    ),
+  ]);
 
   if (experiencesError) {
     throw new Error(experiencesError.message);
   }
 
-  if (participantsError) {
-    throw new Error(participantsError.message);
-  }
-
   const participantCountBySlug = new Map<string, number>();
   const checkedInCountBySlug = new Map<string, number>();
-  for (const row of participantRows ?? []) {
+  for (const row of participantRows) {
     participantCountBySlug.set(row.workshop_slug, (participantCountBySlug.get(row.workshop_slug) ?? 0) + 1);
     if (row.checked_in) {
       checkedInCountBySlug.set(row.workshop_slug, (checkedInCountBySlug.get(row.workshop_slug) ?? 0) + 1);
@@ -466,34 +487,40 @@ function average(values: number[]): number | null {
 export async function getExperienceSurveyResults(experienceId: string): Promise<ExperienceSurveyResults> {
   const supabase = await createClient();
 
-  const [{ data: responseRows, error: responsesError }, { data: participantRows, error: participantsError }] =
-    await Promise.all([
-      supabase
-        .from("survey_responses")
-        .select(
-          "id, participant_id, content_rating, facilitator_rating, logistics_rating, overall_rating, highlights, improvements, additional_comments, submitted_at, flagged"
-        )
-        .eq("workshop_id", experienceId)
-        // Sprint 17: content_rating/etc. are nullable now — a null here
-        // means this response was submitted against a custom template (its
-        // answers live in survey_answers, surfaced separately via
-        // getSurveyResultsByTemplate) rather than the legacy hardcoded
-        // form. Filtering keeps this function's contract exactly as it was
-        // for genuinely legacy responses.
-        .not("overall_rating", "is", null)
-        .order("submitted_at", { ascending: false }),
-      supabase.from("participants").select("id, first_name"),
-    ]);
+  const { data: responseRows, error: responsesError } = await supabase
+    .from("survey_responses")
+    .select(
+      "id, participant_id, content_rating, facilitator_rating, logistics_rating, overall_rating, highlights, improvements, additional_comments, submitted_at, flagged"
+    )
+    .eq("workshop_id", experienceId)
+    // Sprint 17: content_rating/etc. are nullable now — a null here
+    // means this response was submitted against a custom template (its
+    // answers live in survey_answers, surfaced separately via
+    // getSurveyResultsByTemplate) rather than the legacy hardcoded
+    // form. Filtering keeps this function's contract exactly as it was
+    // for genuinely legacy responses.
+    .not("overall_rating", "is", null)
+    .order("submitted_at", { ascending: false });
 
   if (responsesError) {
     throw new Error(responsesError.message);
   }
 
+  const rows: SurveyResponseRow[] = responseRows ?? [];
+
+  // Scoped to just this experience's respondents (never more than a few
+  // hundred), not every participant org-wide — avoids both the 1000-row
+  // PostgREST cap and fetching thousands of unrelated rows for a lookup.
+  const participantIds = [...new Set(rows.map((row) => row.participant_id))];
+  const { data: participantRows, error: participantsError } =
+    participantIds.length > 0
+      ? await supabase.from("participants").select("id, first_name").in("id", participantIds)
+      : { data: [] as { id: string; first_name: string }[], error: null };
+
   if (participantsError) {
     throw new Error(participantsError.message);
   }
 
-  const rows: SurveyResponseRow[] = responseRows ?? [];
   const firstNameByParticipantId = new Map(
     (participantRows ?? []).map((p) => [p.id as string, p.first_name as string])
   );

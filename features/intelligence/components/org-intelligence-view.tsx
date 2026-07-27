@@ -66,6 +66,14 @@ export function OrgIntelligenceView({ data, satisfaction, operations }: Props) {
     <div className="space-y-8">
       {/* Section 1 — Operational Health */}
       <section className="space-y-3">
+        {data.excludedResponseCount > 0 && (
+          <p className="flex items-start gap-2 rounded-lg border border-border-subtle bg-night/40 p-3 text-xs text-muted-foreground">
+            <Info className="mt-0.5 size-3.5 shrink-0 text-gold" />
+            {data.excludedResponseCount} satisfaction response{data.excludedResponseCount === 1 ? "" : "s"} submitted through
+            a custom survey template {data.excludedResponseCount === 1 ? "isn't" : "aren't"} reflected in the satisfaction
+            figures below — this view currently only aggregates the standard rating form.
+          </p>
+        )}
         {period.isPartial && (
           <p className="flex items-start gap-2 rounded-lg border border-border-subtle bg-night/40 p-3 text-xs text-muted-foreground">
             <Info className="mt-0.5 size-3.5 shrink-0 text-gold" />

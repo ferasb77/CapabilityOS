@@ -11,6 +11,7 @@ import { getSessionContext } from "@/infrastructure/session/session-context";
 
 import { MAX_MATERIAL_FILE_BYTES, materialFormSchema } from "./schema";
 import { getFacilitatorMaterialSignedUrl, uploadMaterialFile } from "./storage";
+import { toActionError } from "@/shared/errors/action-error";
 
 type SupabaseServiceClient = ReturnType<typeof createServiceRoleClient>;
 
@@ -119,7 +120,7 @@ async function sendMaterialsEmailToParticipant(
     });
 
     if (error) {
-      return { ok: false, error: error.message };
+      return { ok: false, error: toActionError(error, "materials") };
     }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Unable to send email." };
@@ -177,7 +178,7 @@ export async function sendMaterialsLink(experienceId: string, experienceSlug: st
     .maybeSingle();
 
   if (experienceError) {
-    return { success: false, error: experienceError.message };
+    return { success: false, error: toActionError(experienceError, "materials") };
   }
   if (!experience) {
     return { success: false, error: "Experience not found." };
@@ -189,7 +190,7 @@ export async function sendMaterialsLink(experienceId: string, experienceSlug: st
     .eq("workshop_slug", experience.slug);
 
   if (participantsError) {
-    return { success: false, error: participantsError.message };
+    return { success: false, error: toActionError(participantsError, "materials") };
   }
 
   let sent = 0;
@@ -290,7 +291,7 @@ export async function addMaterial(
     .maybeSingle();
 
   if (lastRowError) {
-    return { success: false, error: lastRowError.message };
+    return { success: false, error: toActionError(lastRowError, "materials") };
   }
 
   const nextOrderIndex = (lastRow?.order_index ?? -1) + 1;
@@ -317,7 +318,7 @@ export async function addMaterial(
     .single();
 
   if (error || !inserted) {
-    return { success: false, error: error?.message ?? "Unable to add material." };
+    return { success: false, error: toActionError(error, "materials", "Unable to add material.") };
   }
 
   revalidatePath(`/dashboard/experiences/${experienceSlug}`);
@@ -384,7 +385,7 @@ export async function updateMaterial(
   const { error } = await supabase.from("experience_materials").update(updatePayload).eq("id", materialId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "materials") };
   }
 
   revalidatePath(`/dashboard/experiences/${experienceSlug}`);
@@ -403,7 +404,7 @@ export async function deleteMaterial(materialId: string, experienceSlug: string)
     .eq("id", materialId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "materials") };
   }
 
   revalidatePath(`/dashboard/experiences/${experienceSlug}`);
@@ -428,7 +429,7 @@ export async function reorderMaterials(experienceSlug: string, materialIds: stri
       .eq("id", materialIds[index]);
 
     if (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: toActionError(error, "materials") };
     }
   }
 
@@ -455,7 +456,7 @@ export async function releaseMaterial(
   const { error } = await supabase.from("experience_materials").update({ is_released: true }).eq("id", materialId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "materials") };
   }
 
   revalidatePath(`/dashboard/experiences/${experienceSlug}`);
@@ -535,7 +536,7 @@ export async function addFacilitatorMaterial(
     .maybeSingle();
 
   if (lastRowError) {
-    return { success: false, error: lastRowError.message };
+    return { success: false, error: toActionError(lastRowError, "materials") };
   }
 
   const nextOrderIndex = (lastRow?.order_index ?? -1) + 1;
@@ -562,7 +563,7 @@ export async function addFacilitatorMaterial(
     .single();
 
   if (error || !inserted) {
-    return { success: false, error: error?.message ?? "Unable to add resource." };
+    return { success: false, error: toActionError(error, "materials", "Unable to add resource.") };
   }
 
   revalidatePath(`/dashboard/experiences/${experienceSlug}`);

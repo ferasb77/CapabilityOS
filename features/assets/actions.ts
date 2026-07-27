@@ -6,6 +6,7 @@ import { createClient } from "@/infrastructure/supabase/server";
 import { getSessionContext } from "@/infrastructure/session/session-context";
 
 import { assetFormSchema, assignAssetSchema, stockAdjustmentSchema } from "./schema";
+import { toActionError } from "@/shared/errors/action-error";
 
 const ASSETS_PATH = "/dashboard/assets";
 
@@ -84,7 +85,7 @@ export async function createAsset(formData: FormData): Promise<SaveAssetResult> 
     .single();
 
   if (error || !inserted) {
-    return { success: false, error: error?.message ?? "Unable to add asset." };
+    return { success: false, error: toActionError(error, "assets", "Unable to add asset.") };
   }
 
   revalidatePath(ASSETS_PATH);
@@ -122,7 +123,7 @@ export async function updateAsset(assetId: string, formData: FormData): Promise<
     .eq("id", assetId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "assets") };
   }
 
   revalidatePath(ASSETS_PATH);
@@ -141,7 +142,7 @@ export async function deleteAsset(assetId: string): Promise<DeleteAssetResult> {
     .eq("id", assetId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "assets") };
   }
 
   revalidatePath(ASSETS_PATH);
@@ -189,13 +190,13 @@ export async function assignAsset(
   ]);
 
   if (experienceError) {
-    return { success: false, error: experienceError.message };
+    return { success: false, error: toActionError(experienceError, "assets") };
   }
   if (!experience) {
     return { success: false, error: "Experience not found." };
   }
   if (assetError) {
-    return { success: false, error: assetError.message };
+    return { success: false, error: toActionError(assetError, "assets") };
   }
   if (!asset) {
     return { success: false, error: "Asset not found." };
@@ -210,7 +211,7 @@ export async function assignAsset(
     });
 
     if (conflictError) {
-      return { success: false, error: conflictError.message };
+      return { success: false, error: toActionError(conflictError, "assets") };
     }
 
     const conflict = (conflicts as ConflictRpcRow[] | null)?.[0];
@@ -248,7 +249,7 @@ export async function assignAsset(
   });
 
   if (insertError) {
-    return { success: false, error: insertError.message };
+    return { success: false, error: toActionError(insertError, "assets") };
   }
 
   if (asset.asset_type === "consumable") {
@@ -258,7 +259,7 @@ export async function assignAsset(
       .eq("id", assetId);
 
     if (stockError) {
-      return { success: false, error: stockError.message };
+      return { success: false, error: toActionError(stockError, "assets") };
     }
   }
 
@@ -288,7 +289,7 @@ export async function removeAssetAssignment(assignmentId: string, experienceSlug
     .maybeSingle();
 
   if (fetchError) {
-    return { success: false, error: fetchError.message };
+    return { success: false, error: toActionError(fetchError, "assets") };
   }
   if (!assignment) {
     return { success: false, error: "Assignment not found." };
@@ -302,7 +303,7 @@ export async function removeAssetAssignment(assignmentId: string, experienceSlug
     .eq("id", assignmentId);
 
   if (updateError) {
-    return { success: false, error: updateError.message };
+    return { success: false, error: toActionError(updateError, "assets") };
   }
 
   if (asset?.asset_type === "consumable") {
@@ -312,7 +313,7 @@ export async function removeAssetAssignment(assignmentId: string, experienceSlug
       .eq("id", assignment.asset_id);
 
     if (stockError) {
-      return { success: false, error: stockError.message };
+      return { success: false, error: toActionError(stockError, "assets") };
     }
   }
 
@@ -334,7 +335,7 @@ export async function updateAssignmentStatus(
   const { error } = await supabase.from("experience_assets").update({ status }).eq("id", assignmentId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "assets") };
   }
 
   revalidatePath(experiencePath(experienceSlug));
@@ -372,7 +373,7 @@ export async function adjustStock(assetId: string, formData: FormData): Promise<
     .maybeSingle();
 
   if (assetError) {
-    return { success: false, error: assetError.message };
+    return { success: false, error: toActionError(assetError, "assets") };
   }
   if (!asset) {
     return { success: false, error: "Asset not found." };
@@ -386,7 +387,7 @@ export async function adjustStock(assetId: string, formData: FormData): Promise<
   const { error: updateError } = await supabase.from("assets").update({ stock_quantity: nextQuantity }).eq("id", assetId);
 
   if (updateError) {
-    return { success: false, error: updateError.message };
+    return { success: false, error: toActionError(updateError, "assets") };
   }
 
   const { error: logError } = await supabase.from("asset_stock_adjustments").insert({
@@ -399,7 +400,7 @@ export async function adjustStock(assetId: string, formData: FormData): Promise<
   });
 
   if (logError) {
-    return { success: false, error: logError.message };
+    return { success: false, error: toActionError(logError, "assets") };
   }
 
   revalidatePath(ASSETS_PATH);

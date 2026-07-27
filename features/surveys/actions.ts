@@ -23,6 +23,7 @@ import {
   type SurveyType,
 } from "./schema";
 import { getSurveyTemplate, type SurveyTemplateWithQuestions } from "./data";
+import { toActionError } from "@/shared/errors/action-error";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -59,7 +60,7 @@ async function ensureTokenAndSend(
     .maybeSingle();
 
   if (findError) {
-    return { ok: false, error: findError.message };
+    return { ok: false, error: toActionError(findError, "surveys") };
   }
 
   if (existing?.completed_at) {
@@ -75,7 +76,7 @@ async function ensureTokenAndSend(
       .eq("id", existing.id);
 
     if (error) {
-      return { ok: false, error: error.message };
+      return { ok: false, error: toActionError(error, "surveys") };
     }
   } else {
     const { data: inserted, error } = await supabase
@@ -90,7 +91,7 @@ async function ensureTokenAndSend(
       .single();
 
     if (error || !inserted) {
-      return { ok: false, error: error?.message ?? "Unable to create survey token." };
+      return { ok: false, error: toActionError(error, "surveys", "Unable to create survey token.") };
     }
 
     token = inserted.token;
@@ -118,7 +119,7 @@ async function ensureTokenAndSend(
     });
 
     if (sendError) {
-      return { ok: false, error: sendError.message };
+      return { ok: false, error: toActionError(sendError, "surveys") };
     }
   } catch (error) {
     return {
@@ -217,11 +218,11 @@ export async function sendSurveyToAllParticipants(
     ]);
 
   if (participantsError) {
-    return { success: false, error: participantsError.message };
+    return { success: false, error: toActionError(participantsError, "surveys") };
   }
 
   if (tokensError) {
-    return { success: false, error: tokensError.message };
+    return { success: false, error: toActionError(tokensError, "surveys") };
   }
 
   const participantIdsWithTokens = new Set((tokens ?? []).map((token) => token.participant_id));
@@ -345,7 +346,7 @@ export async function sendToNonResponders(
     .maybeSingle();
 
   if (experienceError) {
-    return { success: false, error: experienceError.message };
+    return { success: false, error: toActionError(experienceError, "surveys") };
   }
 
   if (!experience) {
@@ -366,11 +367,11 @@ export async function sendToNonResponders(
     ]);
 
   if (participantsError) {
-    return { success: false, error: participantsError.message };
+    return { success: false, error: toActionError(participantsError, "surveys") };
   }
 
   if (tokensError) {
-    return { success: false, error: tokensError.message };
+    return { success: false, error: toActionError(tokensError, "surveys") };
   }
 
   const tokenByParticipantId = new Map((tokens ?? []).map((token) => [token.participant_id, token]));
@@ -440,7 +441,7 @@ export async function sendSurveyReminder(tokenId: string): Promise<SendReminderR
     .maybeSingle();
 
   if (tokenError) {
-    return { success: false, error: tokenError.message };
+    return { success: false, error: toActionError(tokenError, "surveys") };
   }
 
   if (!token) {
@@ -492,7 +493,7 @@ export async function sendSurveyReminder(tokenId: string): Promise<SendReminderR
     });
 
     if (sendError) {
-      return { success: false, error: sendError.message };
+      return { success: false, error: toActionError(sendError, "surveys") };
     }
   } catch (error) {
     return {
@@ -508,7 +509,7 @@ export async function sendSurveyReminder(tokenId: string): Promise<SendReminderR
     .eq("id", tokenId);
 
   if (updateError) {
-    return { success: false, error: updateError.message };
+    return { success: false, error: toActionError(updateError, "surveys") };
   }
 
   revalidatePath(`/dashboard/experiences/${experience.slug}`);
@@ -535,7 +536,7 @@ export async function flagSurveyResponse(
     .maybeSingle();
 
   if (fetchError) {
-    return { success: false, error: fetchError.message };
+    return { success: false, error: toActionError(fetchError, "surveys") };
   }
 
   if (!response) {
@@ -545,7 +546,7 @@ export async function flagSurveyResponse(
   const { error } = await supabase.from("survey_responses").update({ flagged }).eq("id", responseId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "surveys") };
   }
 
   const { data: experience } = await supabase
@@ -599,7 +600,9 @@ const SURVEY_CSV_HEADER = [
   "Submitted At",
 ];
 
-export async function downloadSurveyResults(experienceId: string): Promise<string> {
+export type DownloadSurveyResultsResult = { success: true; csv: string } | { success: false; error: string };
+
+export async function downloadSurveyResults(experienceId: string): Promise<DownloadSurveyResultsResult> {
   const supabase = await createClient();
 
   const { data: responseRows, error } = await supabase
@@ -612,7 +615,7 @@ export async function downloadSurveyResults(experienceId: string): Promise<strin
     .order("submitted_at", { ascending: false });
 
   if (error) {
-    throw new Error(error.message);
+    return { success: false, error: toActionError(error, "surveys", "Unable to load survey results.") };
   }
 
   const rows = responseRows ?? [];
@@ -624,7 +627,7 @@ export async function downloadSurveyResults(experienceId: string): Promise<strin
       : { data: [], error: null };
 
   if (participantsError) {
-    throw new Error(participantsError.message);
+    return { success: false, error: toActionError(participantsError, "surveys", "Unable to load survey results.") };
   }
 
   const participantById = new Map((participantRows ?? []).map((row) => [row.id, row]));
@@ -646,7 +649,7 @@ export async function downloadSurveyResults(experienceId: string): Promise<strin
     ]);
   });
 
-  return [csvRow(SURVEY_CSV_HEADER), ...csvRows].join("\r\n");
+  return { success: true, csv: [csvRow(SURVEY_CSV_HEADER), ...csvRows].join("\r\n") };
 }
 
 // ---------------------------------------------------------------------------
@@ -690,7 +693,7 @@ export async function createSurveyTemplate(
     .single();
 
   if (error || !inserted) {
-    return { success: false, error: error?.message ?? "Unable to create template." };
+    return { success: false, error: toActionError(error, "surveys", "Unable to create template.") };
   }
 
   revalidatePath("/dashboard/settings/surveys");
@@ -729,7 +732,7 @@ export async function updateSurveyTemplate(
     .eq("id", templateId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "surveys") };
   }
 
   revalidatePath("/dashboard/settings/surveys");
@@ -758,7 +761,7 @@ export async function deleteSurveyTemplate(templateId: string): Promise<DeleteSu
         error: "This template is assigned to one or more experiences. Unassign it first.",
       };
     }
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "surveys") };
   }
 
   revalidatePath("/dashboard/settings/surveys");
@@ -783,7 +786,7 @@ export async function setDefaultSurveyTemplate(
     .maybeSingle();
 
   if (templateError) {
-    return { success: false, error: templateError.message };
+    return { success: false, error: toActionError(templateError, "surveys") };
   }
   if (!template) {
     return { success: false, error: "Template not found." };
@@ -797,13 +800,13 @@ export async function setDefaultSurveyTemplate(
     .neq("id", templateId);
 
   if (clearError) {
-    return { success: false, error: clearError.message };
+    return { success: false, error: toActionError(clearError, "surveys") };
   }
 
   const { error } = await supabase.from("survey_templates").update({ is_default: true }).eq("id", templateId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "surveys") };
   }
 
   revalidatePath("/dashboard/settings/surveys");
@@ -851,7 +854,7 @@ export async function addQuestion(templateId: string, values: SurveyQuestionForm
     .maybeSingle();
 
   if (existingError) {
-    return { success: false, error: existingError.message };
+    return { success: false, error: toActionError(existingError, "surveys") };
   }
 
   const nextOrderIndex = (existing?.order_index ?? 0) + 1;
@@ -863,7 +866,7 @@ export async function addQuestion(templateId: string, values: SurveyQuestionForm
     .single();
 
   if (error || !inserted) {
-    return { success: false, error: error?.message ?? "Unable to add question." };
+    return { success: false, error: toActionError(error, "surveys", "Unable to add question.") };
   }
 
   revalidatePath(`/dashboard/settings/surveys/${templateId}/edit`);
@@ -898,7 +901,7 @@ export async function updateQuestion(
     .eq("id", questionId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "surveys") };
   }
 
   revalidatePath(`/dashboard/settings/surveys/${templateId}/edit`);
@@ -914,7 +917,7 @@ export async function deleteQuestion(questionId: string, templateId: string): Pr
   const { error } = await supabase.from("survey_questions").delete().eq("id", questionId);
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: toActionError(error, "surveys") };
   }
 
   revalidatePath(`/dashboard/settings/surveys/${templateId}/edit`);
@@ -943,7 +946,7 @@ export async function reorderQuestions(templateId: string, orderedQuestionIds: s
       .eq("template_id", templateId);
 
     if (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: toActionError(error, "surveys") };
     }
   }
 
@@ -974,7 +977,7 @@ export async function assignExperienceSurveyTemplate(
       .eq("survey_type", surveyType);
 
     if (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: toActionError(error, "surveys") };
     }
   } else {
     const { error } = await supabase.from("experience_survey_templates").upsert(
@@ -983,7 +986,7 @@ export async function assignExperienceSurveyTemplate(
     );
 
     if (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: toActionError(error, "surveys") };
     }
   }
 
@@ -1086,7 +1089,7 @@ export async function saveExperienceSurveyConfig(
         .eq("survey_type", surveyType);
 
       if (error) {
-        return { success: false, error: error.message };
+        return { success: false, error: toActionError(error, "surveys") };
       }
       continue;
     }
@@ -1102,7 +1105,7 @@ export async function saveExperienceSurveyConfig(
     );
 
     if (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: toActionError(error, "surveys") };
     }
   }
 
@@ -1140,13 +1143,13 @@ async function sendTypedSurveyToAll(
   ]);
 
   if (experienceError) {
-    return { success: false, error: experienceError.message };
+    return { success: false, error: toActionError(experienceError, "surveys") };
   }
   if (!experience) {
     return { success: false, error: "Experience not found." };
   }
   if (configError) {
-    return { success: false, error: configError.message };
+    return { success: false, error: toActionError(configError, "surveys") };
   }
   if (!config) {
     return { success: false, error: "This survey type isn't configured for this experience yet." };
@@ -1163,10 +1166,10 @@ async function sendTypedSurveyToAll(
     ]);
 
   if (participantsError) {
-    return { success: false, error: participantsError.message };
+    return { success: false, error: toActionError(participantsError, "surveys") };
   }
   if (tokensError) {
-    return { success: false, error: tokensError.message };
+    return { success: false, error: toActionError(tokensError, "surveys") };
   }
 
   const participantIdsWithTokens = new Set((tokens ?? []).map((token) => token.participant_id));

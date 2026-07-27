@@ -8,6 +8,7 @@ import { renderMilestoneTriggeredEmail } from "@/infrastructure/email/financial-
 import { createClient } from "@/infrastructure/supabase/server";
 
 import { getPrimaryFinanceContactEmail } from "./data";
+import { toActionError } from "@/shared/errors/action-error";
 import {
   financeContactSchema,
   financeSettingsSchema,
@@ -75,7 +76,7 @@ async function sendMilestoneNotificationCore(
     .eq("id", milestoneId)
     .maybeSingle();
 
-  if (milestoneError) return { success: false, error: milestoneError.message };
+  if (milestoneError) return { success: false, error: toActionError(milestoneError, "financial") };
   if (!milestone) return { success: false, error: "Milestone not found." };
 
   const { data: engagementRow, error: engagementError } = await supabase
@@ -84,7 +85,7 @@ async function sendMilestoneNotificationCore(
     .eq("id", milestone.engagement_id)
     .maybeSingle();
 
-  if (engagementError) return { success: false, error: engagementError.message };
+  if (engagementError) return { success: false, error: toActionError(engagementError, "financial") };
   if (!engagementRow) return { success: false, error: "Engagement not found." };
 
   const engagement = engagementRow as unknown as {
@@ -101,7 +102,7 @@ async function sendMilestoneNotificationCore(
     .eq("engagement_id", milestone.engagement_id)
     .is("deleted_at", null);
 
-  if (siblingError) return { success: false, error: siblingError.message };
+  if (siblingError) return { success: false, error: toActionError(siblingError, "financial") };
 
   const previouslyCollected = (siblingMilestones ?? [])
     .filter((m) => m.status === "collected")
@@ -150,7 +151,7 @@ async function sendMilestoneNotificationCore(
     });
 
     if (sendError) {
-      return { success: false, error: sendError.message };
+      return { success: false, error: toActionError(sendError, "financial") };
     }
   } catch (sendError) {
     return { success: false, error: sendError instanceof Error ? sendError.message : "Unable to send notification email." };
@@ -320,7 +321,7 @@ export async function triggerMilestone(milestoneId: string): Promise<MilestoneAc
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (error) return { success: false, error: error.message };
+  if (error) return { success: false, error: toActionError(error, "financial") };
   if (!milestone) return { success: false, error: "Milestone not found." };
   if (milestone.status !== "pending") return { success: false, error: "Only a pending milestone can be triggered." };
 
@@ -341,7 +342,7 @@ export async function sendMilestoneNotification(milestoneId: string): Promise<Mi
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (error) return { success: false, error: error.message };
+  if (error) return { success: false, error: toActionError(error, "financial") };
   if (!milestone) return { success: false, error: "Milestone not found." };
 
   const reason = triggerReasonFor(milestone.trigger_type, {});
@@ -370,7 +371,7 @@ export async function updateMilestoneStatus(milestoneId: string, nextStatus: Mil
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (error) return { success: false, error: error.message };
+  if (error) return { success: false, error: toActionError(error, "financial") };
   if (!milestone) return { success: false, error: "Milestone not found." };
 
   const currentStatus = milestone.status as MilestoneStatus;
@@ -383,7 +384,7 @@ export async function updateMilestoneStatus(milestoneId: string, nextStatus: Mil
   if (nextStatus === "collected") updates.collected_at = new Date().toISOString();
 
   const { error: updateError } = await supabase.from("payment_milestones").update(updates).eq("id", milestoneId);
-  if (updateError) return { success: false, error: updateError.message };
+  if (updateError) return { success: false, error: toActionError(updateError, "financial") };
 
   await revalidateEngagementFinancial(supabase, milestone.engagement_id);
   return { success: true };
@@ -432,7 +433,7 @@ export async function createMilestone(engagementId: string, formData: FormData):
     .eq("id", engagementId)
     .maybeSingle();
 
-  if (engagementError) return { success: false, error: engagementError.message };
+  if (engagementError) return { success: false, error: toActionError(engagementError, "financial") };
   if (!engagement) return { success: false, error: "Engagement not found." };
 
   const { data: inserted, error } = await supabase
@@ -454,7 +455,7 @@ export async function createMilestone(engagementId: string, formData: FormData):
     .select("id")
     .single();
 
-  if (error || !inserted) return { success: false, error: error?.message ?? "Unable to create milestone." };
+  if (error || !inserted) return { success: false, error: toActionError(error, "financial", "Unable to create milestone.") };
 
   revalidatePath(`/dashboard/clients/${engagement.client_id}/engagements/${engagementId}`);
 
@@ -482,7 +483,7 @@ export async function updateMilestone(milestoneId: string, formData: FormData): 
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (fetchError) return { success: false, error: fetchError.message };
+  if (fetchError) return { success: false, error: toActionError(fetchError, "financial") };
   if (!existing) return { success: false, error: "Milestone not found." };
 
   const { error } = await supabase
@@ -501,7 +502,7 @@ export async function updateMilestone(milestoneId: string, formData: FormData): 
     })
     .eq("id", milestoneId);
 
-  if (error) return { success: false, error: error.message };
+  if (error) return { success: false, error: toActionError(error, "financial") };
 
   const clientId = (existing.engagements as unknown as { client_id: string } | null)?.client_id;
   if (clientId) revalidatePath(`/dashboard/clients/${clientId}/engagements/${existing.engagement_id}`);
@@ -518,7 +519,7 @@ export async function deleteMilestone(milestoneId: string): Promise<MilestoneAct
     .eq("id", milestoneId)
     .maybeSingle();
 
-  if (fetchError) return { success: false, error: fetchError.message };
+  if (fetchError) return { success: false, error: toActionError(fetchError, "financial") };
   if (!existing) return { success: false, error: "Milestone not found." };
 
   const { error } = await supabase
@@ -526,7 +527,7 @@ export async function deleteMilestone(milestoneId: string): Promise<MilestoneAct
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", milestoneId);
 
-  if (error) return { success: false, error: error.message };
+  if (error) return { success: false, error: toActionError(error, "financial") };
 
   const clientId = (existing.engagements as unknown as { client_id: string } | null)?.client_id;
   if (clientId) revalidatePath(`/dashboard/clients/${clientId}/engagements/${existing.engagement_id}`);
@@ -558,7 +559,7 @@ export async function createFinanceContact(workspaceId: string, formData: FormDa
       .from("finance_contacts")
       .update({ is_primary: false })
       .eq("workspace_id", workspaceId);
-    if (clearError) return { success: false, error: clearError.message };
+    if (clearError) return { success: false, error: toActionError(clearError, "financial") };
   }
 
   const { error } = await supabase.from("finance_contacts").insert({
@@ -568,7 +569,7 @@ export async function createFinanceContact(workspaceId: string, formData: FormDa
     is_primary: parsed.data.isPrimary,
   });
 
-  if (error) return { success: false, error: error.message };
+  if (error) return { success: false, error: toActionError(error, "financial") };
 
   revalidatePath(FINANCE_SETTINGS_PATH);
   return { success: true };
@@ -581,10 +582,10 @@ export async function setFinanceContactPrimary(contactId: string, workspaceId: s
     .from("finance_contacts")
     .update({ is_primary: false })
     .eq("workspace_id", workspaceId);
-  if (clearError) return { success: false, error: clearError.message };
+  if (clearError) return { success: false, error: toActionError(clearError, "financial") };
 
   const { error } = await supabase.from("finance_contacts").update({ is_primary: true }).eq("id", contactId);
-  if (error) return { success: false, error: error.message };
+  if (error) return { success: false, error: toActionError(error, "financial") };
 
   revalidatePath(FINANCE_SETTINGS_PATH);
   return { success: true };
@@ -598,7 +599,7 @@ export async function deleteFinanceContact(contactId: string): Promise<Milestone
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", contactId);
 
-  if (error) return { success: false, error: error.message };
+  if (error) return { success: false, error: toActionError(error, "financial") };
 
   revalidatePath(FINANCE_SETTINGS_PATH);
   return { success: true };
@@ -624,7 +625,7 @@ export async function updateFinanceSettings(workspaceId: string, formData: FormD
     })
     .eq("id", workspaceId);
 
-  if (error) return { success: false, error: error.message };
+  if (error) return { success: false, error: toActionError(error, "financial") };
 
   revalidatePath(FINANCE_SETTINGS_PATH);
   return { success: true };
