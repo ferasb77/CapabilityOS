@@ -2,11 +2,55 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { RecentExperiencesPanel } from "@/features/dashboard/components/recent-experiences-panel";
-import { getAllExperiences } from "@/features/experiences/data";
+import { ExperiencesView } from "@/features/experiences/components/experiences-view";
+import { getAllExperiencesFiltered } from "@/features/experiences/data";
+import { EXPERIENCE_TYPES, type ExperienceType } from "@/features/experiences/schema";
+import type { ExperienceStatus } from "@/infrastructure/repositories/dashboard";
+import { getClientOptions } from "@/features/clients/data";
+import { getEngagementOptions } from "@/features/engagements/data";
 
-export default async function ExperiencesPage() {
-  const experiences = await getAllExperiences();
+const EXPERIENCE_STATUSES: ExperienceStatus[] = ["draft", "active", "completed", "cancelled"];
+
+type Props = {
+  searchParams: Promise<{
+    search?: string;
+    clientId?: string;
+    engagementId?: string;
+    experienceType?: string;
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    page?: string;
+  }>;
+};
+
+export default async function ExperiencesPage({ searchParams }: Props) {
+  const params = await searchParams;
+
+  const experienceType = EXPERIENCE_TYPES.includes(params.experienceType as ExperienceType)
+    ? (params.experienceType as ExperienceType)
+    : undefined;
+  const status = EXPERIENCE_STATUSES.includes(params.status as ExperienceStatus)
+    ? (params.status as ExperienceStatus)
+    : undefined;
+  const page = params.page ? Number.parseInt(params.page, 10) || 1 : 1;
+
+  const filters = {
+    search: params.search?.trim() || undefined,
+    clientId: params.clientId || undefined,
+    engagementId: params.engagementId || undefined,
+    experienceType,
+    status,
+    dateFrom: params.dateFrom || undefined,
+    dateTo: params.dateTo || undefined,
+    page,
+  };
+
+  const [result, clients, engagements] = await Promise.all([
+    getAllExperiencesFiltered(filters),
+    getClientOptions(),
+    getEngagementOptions(),
+  ]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-8">
@@ -14,7 +58,8 @@ export default async function ExperiencesPage() {
         <div>
           <h1 className="text-3xl font-bold">Experiences</h1>
           <p className="mt-2 text-muted-foreground">
-            Every experience across every client — workshops, assessments, coaching, and more.
+            {result.totalCount} experience{result.totalCount === 1 ? "" : "s"} across every client — workshops,
+            assessments, coaching, and more.
           </p>
         </div>
 
@@ -24,10 +69,22 @@ export default async function ExperiencesPage() {
         </Button>
       </div>
 
-      <RecentExperiencesPanel
-        experiences={experiences}
-        title="All Experiences"
-        description={`${experiences.length} experience${experiences.length === 1 ? "" : "s"}, ordered by start date.`}
+      <ExperiencesView
+        experiences={result.experiences}
+        totalCount={result.totalCount}
+        page={result.page}
+        totalPages={result.totalPages}
+        clients={clients}
+        engagements={engagements.map((e) => ({ id: e.id, title: e.title, clientId: e.clientId }))}
+        currentFilters={{
+          search: filters.search,
+          clientId: filters.clientId,
+          engagementId: filters.engagementId,
+          experienceType: filters.experienceType,
+          status: filters.status,
+          dateFrom: filters.dateFrom,
+          dateTo: filters.dateTo,
+        }}
       />
     </div>
   );

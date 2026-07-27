@@ -2,29 +2,7 @@ import { createClient } from "@/infrastructure/supabase/server";
 import type { ExperienceStatus } from "@/infrastructure/repositories/dashboard";
 import type { ExperienceType } from "./schema";
 
-const MAX_FETCH_PAGE = 1000;
-
-/** Supabase/PostgREST caps a plain `.select()` at 1000 rows by default —
- * `participants` runs into the thousands, so any org-wide fetch here goes
- * through this pager instead of risking a silent truncation. Mirrors
- * infrastructure/repositories/dashboard.ts. */
-async function fetchAllRows<T>(
-  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
-): Promise<T[]> {
-  const allRows: T[] = [];
-  let from = 0;
-
-  while (true) {
-    const { data, error } = await buildQuery(from, from + MAX_FETCH_PAGE - 1);
-    if (error) throw new Error(error.message);
-    const rows = data ?? [];
-    allRows.push(...rows);
-    if (rows.length < MAX_FETCH_PAGE) break;
-    from += MAX_FETCH_PAGE;
-  }
-
-  return allRows;
-}
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
 // ---------------------------------------------------------------------------
 // Options (for select/filter dropdowns elsewhere in the app)
@@ -233,7 +211,7 @@ export async function getExperienceForEdit(slug: string): Promise<ExperienceDeta
 }
 
 // ---------------------------------------------------------------------------
-// Flat cross-client list (operations view)
+// Flat cross-client list (operations view) — filtered, server-side paginated
 // ---------------------------------------------------------------------------
 
 export type ExperienceListItem = {
@@ -246,10 +224,34 @@ export type ExperienceListItem = {
   endDate: string;
   venue: string | null;
   capacity: number;
+  clientId: string | null;
   clientName: string | null;
+  engagementId: string | null;
   engagementTitle: string | null;
   participantCount: number;
-  checkedInCount: number;
+  /** Rounded to 1 decimal; null when this experience has no satisfaction
+   * survey responses yet. */
+  avgSatisfaction: number | null;
+};
+
+export type ExperienceListFilters = {
+  search?: string;
+  clientId?: string;
+  engagementId?: string;
+  experienceType?: ExperienceType;
+  status?: ExperienceStatus;
+  /** Inclusive, "YYYY-MM-DD" — filters on start_date. */
+  dateFrom?: string;
+  /** Inclusive, "YYYY-MM-DD" — filters on start_date. */
+  dateTo?: string;
+};
+
+export type PaginatedExperiences = {
+  experiences: ExperienceListItem[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 };
 
 type ExperienceListRow = {
@@ -262,61 +264,188 @@ type ExperienceListRow = {
   end_date: string;
   venue: string | null;
   capacity: number;
+  client_id: string | null;
+  engagement_id: string | null;
   clients: { name: string } | null;
   engagements: { title: string } | null;
 };
 
-/**
- * Every experience across every client — the operations-staff view called
- * out in the sprint brief as distinct from the client-detail drill-down
- * path (Client -> Engagement -> Experience).
- */
-export async function getAllExperiences(): Promise<ExperienceListItem[]> {
-  const supabase = await createClient();
+const EXPERIENCE_LIST_SELECT =
+  "id, slug, title, experience_type, status, start_date, end_date, venue, capacity, client_id, engagement_id, clients(name), engagements(title)";
 
-  const [{ data: experienceRows, error: experiencesError }, participantRows] = await Promise.all([
-    supabase
-      .from("experiences")
-      .select(
-        "id, slug, title, experience_type, status, start_date, end_date, venue, capacity, clients(name), engagements(title)"
-      )
-      .is("deleted_at", null)
-      .order("start_date", { ascending: false }),
-    fetchAllRows<{ workshop_slug: string; checked_in: boolean }>((from, to) =>
-      supabase.from("participants").select("workshop_slug, checked_in").range(from, to)
-    ),
-  ]);
+const EXPERIENCE_DEFAULT_PAGE_SIZE = 25;
+const EXPERIENCE_MAX_PAGE_SIZE = 100;
 
-  if (experiencesError) {
-    throw new Error(experiencesError.message);
+/** Same escaping as features/participants/data.ts's sanitizeSearchTerm —
+ * `.ilike()`'s pattern is a raw string, so `%`/`_` need escaping and a
+ * literal comma/paren can't reach into PostgREST's own filter syntax. */
+function sanitizeExperienceSearchTerm(term: string): string {
+  return term.replace(/[,()]/g, "").replace(/[%_]/g, (char) => `\\${char}`);
+}
+
+/** "YYYY-MM-DD" -> the next calendar day, so an inclusive `dateTo` can be
+ * applied as an exclusive `.lt()` against a timestamptz column without
+ * excluding same-day experiences that start after midnight UTC. */
+function exclusiveUpperBound(dateOnly: string): string {
+  const date = new Date(`${dateOnly}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString();
+}
+
+function experiencesSelectQuery(supabase: SupabaseServerClient) {
+  return supabase
+    .from("experiences")
+    .select(EXPERIENCE_LIST_SELECT, { count: "exact" })
+    .is("deleted_at", null)
+    .order("start_date", { ascending: false });
+}
+
+type ExperiencesSelectQuery = ReturnType<typeof experiencesSelectQuery>;
+
+function applyExperienceFilters(query: ExperiencesSelectQuery, filters: ExperienceListFilters): ExperiencesSelectQuery {
+  let q = query;
+
+  if (filters.clientId) {
+    q = q.eq("client_id", filters.clientId);
   }
-
-  const participantCountBySlug = new Map<string, number>();
-  const checkedInCountBySlug = new Map<string, number>();
-  for (const row of participantRows) {
-    participantCountBySlug.set(row.workshop_slug, (participantCountBySlug.get(row.workshop_slug) ?? 0) + 1);
-    if (row.checked_in) {
-      checkedInCountBySlug.set(row.workshop_slug, (checkedInCountBySlug.get(row.workshop_slug) ?? 0) + 1);
+  if (filters.engagementId) {
+    q = q.eq("engagement_id", filters.engagementId);
+  }
+  if (filters.experienceType) {
+    q = q.eq("experience_type", filters.experienceType);
+  }
+  if (filters.status) {
+    q = q.eq("status", filters.status);
+  }
+  if (filters.dateFrom) {
+    q = q.gte("start_date", `${filters.dateFrom}T00:00:00.000Z`);
+  }
+  if (filters.dateTo) {
+    q = q.lt("start_date", exclusiveUpperBound(filters.dateTo));
+  }
+  if (filters.search) {
+    const term = sanitizeExperienceSearchTerm(filters.search.trim());
+    if (term) {
+      q = q.ilike("title", `%${term}%`);
     }
   }
 
-  const rows = (experienceRows ?? []) as unknown as ExperienceListRow[];
+  return q;
+}
 
-  return rows.map((row) => ({
-    id: row.id,
-    slug: row.slug,
-    title: row.title,
-    experienceType: row.experience_type,
-    status: row.status,
-    startDate: row.start_date,
-    endDate: row.end_date,
-    venue: row.venue,
-    capacity: row.capacity,
-    clientName: row.clients?.name ?? null,
-    engagementTitle: row.engagements?.title ?? null,
-    participantCount: participantCountBySlug.get(row.slug) ?? 0,
-    checkedInCount: checkedInCountBySlug.get(row.slug) ?? 0,
-  }));
+async function fetchExperiencesPage(
+  supabase: SupabaseServerClient,
+  filters: ExperienceListFilters,
+  page: number,
+  pageSize: number
+): Promise<{ rows: ExperienceListRow[]; count: number }> {
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const query = applyExperienceFilters(experiencesSelectQuery(supabase), filters).range(from, to);
+  const { data, count, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return { rows: (data ?? []) as unknown as ExperienceListRow[], count: count ?? 0 };
+}
+
+/**
+ * True server-side pagination, mirroring features/participants/data.ts's
+ * getAllParticipants: every filter (search, client, engagement, type,
+ * status, date range) is applied in the database query itself via
+ * `.range()` + an exact count, so only `pageSize` experience rows are ever
+ * fetched regardless of how many match. Participant counts and satisfaction
+ * averages can't be expressed as a plain join (they're aggregates from two
+ * other tables), so they're resolved by a second pair of queries scoped to
+ * just this page's experience ids/slugs (at most `pageSize`, well under the
+ * .in() URL-length ceiling) — never the whole `participants`/
+ * `survey_responses` tables, which is exactly the pattern that silently
+ * truncated /dashboard/experiences at scale before.
+ */
+export async function getAllExperiencesFiltered(
+  filters: ExperienceListFilters & { page?: number; pageSize?: number } = {}
+): Promise<PaginatedExperiences> {
+  const pageSize = Math.min(Math.max(1, filters.pageSize ?? EXPERIENCE_DEFAULT_PAGE_SIZE), EXPERIENCE_MAX_PAGE_SIZE);
+  const supabase = await createClient();
+
+  const requestedPage = Math.max(1, filters.page ?? 1);
+  let { rows, count } = await fetchExperiencesPage(supabase, filters, requestedPage, pageSize);
+
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  let page = requestedPage;
+
+  // The requested page landed past the last page — most likely a filter
+  // narrowed the result set while a stale ?page= from before still pointed
+  // further in. Refetch the actual last page rather than return nothing.
+  if (rows.length === 0 && count > 0 && requestedPage > 1) {
+    page = totalPages;
+    ({ rows, count } = await fetchExperiencesPage(supabase, filters, page, pageSize));
+  }
+
+  const slugs = rows.map((row) => row.slug);
+  const ids = rows.map((row) => row.id);
+
+  const [participantsResult, responsesResult] = await Promise.all([
+    slugs.length > 0
+      ? supabase.from("participants").select("workshop_slug").in("workshop_slug", slugs)
+      : Promise.resolve({ data: [] as { workshop_slug: string }[], error: null }),
+    ids.length > 0
+      ? supabase
+          .from("survey_responses")
+          .select("workshop_id, overall_rating")
+          .eq("survey_type", "satisfaction")
+          .in("workshop_id", ids)
+      : Promise.resolve({ data: [] as { workshop_id: string; overall_rating: number | null }[], error: null }),
+  ]);
+
+  if (participantsResult.error) {
+    throw new Error(participantsResult.error.message);
+  }
+  if (responsesResult.error) {
+    throw new Error(responsesResult.error.message);
+  }
+
+  const participantCountBySlug = new Map<string, number>();
+  for (const row of participantsResult.data ?? []) {
+    participantCountBySlug.set(row.workshop_slug, (participantCountBySlug.get(row.workshop_slug) ?? 0) + 1);
+  }
+
+  const ratingsByExperienceId = new Map<string, number[]>();
+  for (const row of responsesResult.data ?? []) {
+    if (row.overall_rating === null) continue;
+    const bucket = ratingsByExperienceId.get(row.workshop_id) ?? [];
+    bucket.push(row.overall_rating);
+    ratingsByExperienceId.set(row.workshop_id, bucket);
+  }
+
+  const experiences: ExperienceListItem[] = rows.map((row) => {
+    const ratings = ratingsByExperienceId.get(row.id) ?? [];
+    const avgSatisfaction =
+      ratings.length > 0 ? Math.round((ratings.reduce((sum, value) => sum + value, 0) / ratings.length) * 10) / 10 : null;
+
+    return {
+      id: row.id,
+      slug: row.slug,
+      title: row.title,
+      experienceType: row.experience_type,
+      status: row.status,
+      startDate: row.start_date,
+      endDate: row.end_date,
+      venue: row.venue,
+      capacity: row.capacity,
+      clientId: row.client_id,
+      clientName: row.clients?.name ?? null,
+      engagementId: row.engagement_id,
+      engagementTitle: row.engagements?.title ?? null,
+      participantCount: participantCountBySlug.get(row.slug) ?? 0,
+      avgSatisfaction,
+    };
+  });
+
+  return { experiences, totalCount: count, page, pageSize, totalPages };
 }
 
 // ---------------------------------------------------------------------------
