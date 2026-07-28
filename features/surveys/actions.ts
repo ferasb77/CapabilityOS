@@ -833,6 +833,11 @@ function questionInsertPayload(templateId: string, orderIndex: number, values: S
     options: values.options && values.options.length > 0 ? values.options : null,
     low_label: values.lowLabel ?? null,
     high_label: values.highLabel ?? null,
+    question_text_ar: values.questionTextAr ?? null,
+    description_ar: values.descriptionAr ?? null,
+    options_ar: values.optionsAr && values.optionsAr.length > 0 ? values.optionsAr : null,
+    low_label_ar: values.lowLabelAr ?? null,
+    high_label_ar: values.highLabelAr ?? null,
   };
 }
 
@@ -897,6 +902,11 @@ export async function updateQuestion(
       options: parsed.data.options && parsed.data.options.length > 0 ? parsed.data.options : null,
       low_label: parsed.data.lowLabel ?? null,
       high_label: parsed.data.highLabel ?? null,
+      question_text_ar: parsed.data.questionTextAr ?? null,
+      description_ar: parsed.data.descriptionAr ?? null,
+      options_ar: parsed.data.optionsAr && parsed.data.optionsAr.length > 0 ? parsed.data.optionsAr : null,
+      low_label_ar: parsed.data.lowLabelAr ?? null,
+      high_label_ar: parsed.data.highLabelAr ?? null,
     })
     .eq("id", questionId);
 

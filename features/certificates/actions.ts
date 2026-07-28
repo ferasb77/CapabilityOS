@@ -75,10 +75,10 @@ export async function issueCertificate(participantId: string, experienceId: stri
 
   const [{ data: experience, error: experienceError }, { data: participant, error: participantError }] =
     await Promise.all([
-      supabase.from("experiences").select("id, slug, title").eq("id", experienceId).maybeSingle(),
+      supabase.from("experiences").select("id, slug, title, title_ar").eq("id", experienceId).maybeSingle(),
       supabase
         .from("participants")
-        .select("id, first_name, last_name, email, checked_in")
+        .select("id, first_name, last_name, first_name_ar, last_name_ar, email, checked_in")
         .eq("id", participantId)
         .maybeSingle(),
     ]);
@@ -158,7 +158,17 @@ export async function issueCertificate(participantId: string, experienceId: stri
     return { success: false, error: appUrl.error };
   }
 
-  const participantName = `${participant.first_name} ${participant.last_name}`.trim();
+  // Arabic name only when the participant filled in *both* halves on the
+  // check-in form (see lib/i18n / Sprint 27) — a lone first_name_ar with no
+  // last_name_ar isn't a complete name to print on a certificate.
+  const participantNameIsArabic = Boolean(participant.first_name_ar && participant.last_name_ar);
+  const participantName = participantNameIsArabic
+    ? `${participant.first_name_ar} ${participant.last_name_ar}`.trim()
+    : `${participant.first_name} ${participant.last_name}`.trim();
+
+  const experienceTitleIsArabic = Boolean(experience.title_ar);
+  const experienceTitle = experienceTitleIsArabic ? experience.title_ar! : experience.title;
+
   const completionDate = new Date().toISOString().slice(0, 10);
 
   const { data: inserted, error: insertError } = await supabase
@@ -169,7 +179,7 @@ export async function issueCertificate(participantId: string, experienceId: stri
       experience_id: experienceId,
       template_id: template.id,
       participant_name: participantName,
-      experience_title: experience.title,
+      experience_title: experienceTitle,
       organization_name: template.organization_name,
       completion_date: completionDate,
       email_address: participant.email,
@@ -191,7 +201,9 @@ export async function issueCertificate(participantId: string, experienceId: stri
             uploadedPdfPath: template.uploaded_pdf_path!,
             fieldPlacements: template.field_placements,
             participantName,
-            experienceTitle: experience.title,
+            participantNameIsArabic,
+            experienceTitle,
+            experienceTitleIsArabic,
             organizationName: template.organization_name,
             completionDate,
             verificationCode: inserted.verification_code,
@@ -208,7 +220,9 @@ export async function issueCertificate(participantId: string, experienceId: stri
             signatoryName: template.signatory_name,
             signatoryTitle: template.signatory_title,
             participantName,
-            experienceTitle: experience.title,
+            participantNameIsArabic,
+            experienceTitle,
+            experienceTitleIsArabic,
             completionDate,
             verificationUrl: `${appUrl.url}/verify/${inserted.verification_code}`,
           });
@@ -665,7 +679,9 @@ export async function previewCertificateTemplate(templateId: string): Promise<Pr
       uploadedPdfPath: template.uploaded_pdf_path,
       fieldPlacements: template.field_placements,
       participantName: "Sample Participant",
+      participantNameIsArabic: false,
       experienceTitle: "Sample Experience Title",
+      experienceTitleIsArabic: false,
       organizationName: template.organization_name,
       completionDate: sampleDate,
       verificationCode: "PREVIEW-SAMPLE",
@@ -686,7 +702,9 @@ export async function previewCertificateTemplate(templateId: string): Promise<Pr
     signatoryName: template.signatory_name,
     signatoryTitle: template.signatory_title,
     participantName: "Jordan Sample",
+    participantNameIsArabic: false,
     experienceTitle: "Sample Experience Title",
+    experienceTitleIsArabic: false,
     completionDate: sampleDate,
     verificationUrl: `${appUrl.url}/verify/PREVIEW-SAMPLE`,
   });

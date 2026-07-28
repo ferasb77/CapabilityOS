@@ -231,6 +231,18 @@ export function ExperienceForm({
           <FieldError messages={fieldErrors?.title} />
         </div>
 
+        <div className="space-y-2 sm:col-span-2">
+          <Label htmlFor="titleAr">Arabic Title / العنوان بالعربية</Label>
+          <Input
+            id="titleAr"
+            name="titleAr"
+            dir="rtl"
+            className="font-cairo placeholder:text-right"
+            placeholder="العنوان بالعربية"
+            defaultValue={field("titleAr")}
+          />
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="experienceType">Experience type</Label>
           <Select

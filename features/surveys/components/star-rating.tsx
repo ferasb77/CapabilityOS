@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Star } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { AR } from "@/lib/i18n/ar";
+import { useLanguage } from "@/lib/i18n/language-context";
 
 type Props = {
   name: string;
@@ -13,6 +15,7 @@ type Props = {
 export function StarRating({ name, label }: Props) {
   const [value, setValue] = useState(0);
   const [hovered, setHovered] = useState(0);
+  const { language } = useLanguage();
 
   const display = hovered || value;
 
@@ -42,6 +45,12 @@ export function StarRating({ name, label }: Props) {
           </button>
         ))}
       </div>
+      {language === "ar" && (
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>{AR.survey.poor}</span>
+          <span>{AR.survey.excellent}</span>
+        </div>
+      )}
     </fieldset>
   );
 }

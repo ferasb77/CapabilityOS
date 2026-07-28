@@ -3,6 +3,8 @@
 import { useState, useTransition, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AR } from "@/lib/i18n/ar";
+import { useLanguage } from "@/lib/i18n/language-context";
 
 import type { SurveyType } from "@/features/surveys/schema";
 
@@ -25,6 +27,24 @@ const HEADING_COPY: Record<
   post_training: {
     heading: (name, title) => `After ${title}`,
     subtitle: (name) => `Hi ${name}, tell us what you learned and how you'll apply it.`,
+  },
+};
+
+const HEADING_COPY_AR: Record<
+  SurveyType,
+  { heading: (name: string, title: string) => string; subtitle: (name: string) => string }
+> = {
+  satisfaction: {
+    heading: (name, title) => `${AR.survey.greetingPrefix} ${name}، ${AR.survey.feedbackOn} ${title}`,
+    subtitle: () => AR.survey.satisfactionSubtitle,
+  },
+  pre_training: {
+    heading: (_, title) => `${AR.survey.before} ${title}`,
+    subtitle: () => AR.survey.preSubtitle,
+  },
+  post_training: {
+    heading: (_, title) => `${AR.survey.after} ${title}`,
+    subtitle: () => AR.survey.postSubtitle,
   },
 };
 
@@ -58,6 +78,7 @@ type Props = {
   token: string;
   participantFirstName: string;
   experienceTitle: string;
+  experienceTitleAr?: string | null;
   questions: PublicSurveyQuestion[];
   surveyType?: SurveyType;
 };
@@ -66,6 +87,7 @@ export function CustomSurveyForm({
   token,
   participantFirstName,
   experienceTitle,
+  experienceTitleAr,
   questions,
   surveyType = "satisfaction",
 }: Props) {
@@ -74,12 +96,15 @@ export function CustomSurveyForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const { language } = useLanguage();
+  const isAr = language === "ar";
 
   if (submitted) {
     return <SurveyThankYou surveyType={surveyType} />;
   }
 
-  const copy = HEADING_COPY[surveyType];
+  const copy = isAr ? HEADING_COPY_AR[surveyType] : HEADING_COPY[surveyType];
+  const displayTitle = isAr && experienceTitleAr ? experienceTitleAr : experienceTitle;
 
   function handleAnswerChange(questionId: string, value: AnswerValue) {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
@@ -129,7 +154,7 @@ export function CustomSurveyForm({
     <form onSubmit={handleSubmit} className="space-y-8">
       <div>
         <h1 className="font-heading text-2xl font-semibold text-ivory sm:text-3xl">
-          {copy.heading(participantFirstName, experienceTitle)}
+          {copy.heading(participantFirstName, displayTitle)}
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">{copy.subtitle(participantFirstName)}</p>
       </div>
@@ -153,7 +178,7 @@ export function CustomSurveyForm({
       )}
 
       <Button type="submit" disabled={isPending} size="lg" className="w-full">
-        {isPending ? "Submitting..." : "Submit Feedback"}
+        {isPending ? (isAr ? AR.survey.submitting : "Submitting...") : isAr ? AR.survey.submit : "Submit Feedback"}
       </Button>
     </form>
   );

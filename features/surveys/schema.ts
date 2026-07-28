@@ -99,6 +99,13 @@ export const surveyQuestionSchema = z
     lowLabel: z.preprocess(emptyToUndefined, z.string().trim().optional()),
     highLabel: z.preprocess(emptyToUndefined, z.string().trim().optional()),
     options: z.array(z.string().trim().min(1)).optional(),
+    // Arabic translations — every field here is optional; English is
+    // always the fallback (see lib/i18n) when Arabic is left blank.
+    questionTextAr: z.preprocess(emptyToUndefined, z.string().trim().optional()),
+    descriptionAr: z.preprocess(emptyToUndefined, z.string().trim().optional()),
+    lowLabelAr: z.preprocess(emptyToUndefined, z.string().trim().optional()),
+    highLabelAr: z.preprocess(emptyToUndefined, z.string().trim().optional()),
+    optionsAr: z.array(z.string().trim()).optional(),
   })
   .superRefine((data, ctx) => {
     if (CHOICE_QUESTION_TYPES.includes(data.questionType) && (!data.options || data.options.length < 2)) {

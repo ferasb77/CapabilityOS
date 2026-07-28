@@ -23,6 +23,8 @@ export async function checkInParticipant(
     mobile: formData.get("mobile"),
     company: formData.get("company"),
     jobTitle: formData.get("jobTitle"),
+    firstNameAr: formData.get("firstNameAr"),
+    lastNameAr: formData.get("lastNameAr"),
   };
 
   console.log(values);
@@ -80,6 +82,8 @@ export async function checkInParticipant(
       mobile: parsed.data.mobile,
       company: parsed.data.company,
       job_title: parsed.data.jobTitle,
+      first_name_ar: parsed.data.firstNameAr ?? null,
+      last_name_ar: parsed.data.lastNameAr ?? null,
       checked_in: true,
       source: "QR",
     })

@@ -11,6 +11,16 @@ function formatDate(value: string) {
   return new Date(value).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 }
 
+/** certificates.participant_name / experience_title store the Arabic form
+ * whenever the certificate was issued with one (see features/certificates/
+ * actions.ts) — this page has no language toggle, so it just renders
+ * whichever script the row actually contains. */
+const ARABIC_PATTERN = /[؀-ۿ]/;
+
+function arabicAwareClass(text: string): string | undefined {
+  return ARABIC_PATTERN.test(text) ? "font-cairo" : undefined;
+}
+
 export default async function VerifyCertificatePage({ params }: Props) {
   const { code } = await params;
   const certificate = await getCertificateByVerificationCode(code);
@@ -52,9 +62,13 @@ export default async function VerifyCertificatePage({ params }: Props) {
                 Verified
               </div>
 
-              <h1 className="mt-4 text-2xl font-semibold text-ivory">{certificate.participantName}</h1>
+              <h1 className={`mt-4 text-2xl font-semibold text-ivory ${arabicAwareClass(certificate.participantName) ?? ""}`}>
+                {certificate.participantName}
+              </h1>
               <p className="mt-1 text-muted-foreground">has successfully completed</p>
-              <p className="mt-1 text-lg font-medium text-gold">{certificate.experienceTitle}</p>
+              <p className={`mt-1 text-lg font-medium text-gold ${arabicAwareClass(certificate.experienceTitle) ?? ""}`}>
+                {certificate.experienceTitle}
+              </p>
 
               <dl className="mt-6 space-y-1 text-sm text-muted-foreground">
                 <div className="flex justify-between">

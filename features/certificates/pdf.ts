@@ -1,6 +1,8 @@
+import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type RGB } from "pdf-lib";
 
 import type { FieldPlacements } from "./schema";
+import { getCairoFontBytes } from "./lib/cairo-font";
 import { downloadTemplatePdf } from "./storage";
 
 const PAGE_WIDTH = 842;
@@ -21,7 +23,12 @@ export type CertificatePdfInput = {
   signatoryName: string | null;
   signatoryTitle: string | null;
   participantName: string;
+  /** True when participantName is the participant's Arabic name (both
+   * first_name_ar and last_name_ar were set) rather than their English one. */
+  participantNameIsArabic: boolean;
   experienceTitle: string;
+  /** True when experienceTitle is experiences.title_ar rather than title. */
+  experienceTitleIsArabic: boolean;
   completionDate: string;
   verificationUrl: string;
 };
@@ -47,13 +54,45 @@ function formatCompletionDate(value: string): string {
 
 type FontSet = { regular: PDFFont; bold: PDFFont };
 
-async function loadFonts(pdfDoc: PDFDocument, fontFamily: string): Promise<FontSet> {
+async function loadStandardFonts(pdfDoc: PDFDocument, fontFamily: string): Promise<FontSet> {
   const isSans = fontFamily.toLowerCase().includes("sans");
 
   return {
     regular: await pdfDoc.embedFont(isSans ? StandardFonts.Helvetica : StandardFonts.TimesRoman),
     bold: await pdfDoc.embedFont(isSans ? StandardFonts.HelveticaBold : StandardFonts.TimesRomanBold),
   };
+}
+
+/**
+ * Loads Cairo (Regular + Bold) as a custom embedded font, only when a
+ * certificate actually needs Arabic text — the fetch has real latency, so
+ * an all-English certificate never pays for it. Returns `null` (never
+ * throws) if the CDN fetch fails, so callers can fall back to a standard
+ * font rather than fail certificate generation.
+ */
+async function loadCairoFonts(pdfDoc: PDFDocument): Promise<FontSet | null> {
+  const bytes = await getCairoFontBytes();
+  if (!bytes) {
+    return null;
+  }
+
+  pdfDoc.registerFontkit(fontkit);
+
+  const [regular, bold] = await Promise.all([pdfDoc.embedFont(bytes.regular), pdfDoc.embedFont(bytes.bold)]);
+
+  return { regular, bold };
+}
+
+/**
+ * pdf-lib/fontkit parses font files but does not run a text-shaping engine
+ * (no bidi reordering, no Arabic contextual glyph joining) — drawText would
+ * otherwise lay Arabic characters out left-to-right and in their isolated
+ * presentation form. Reversing the codepoint order at least gets the
+ * overall reading direction right; full cursive joining would need a
+ * HarfBuzz-class shaping engine, out of scope here.
+ */
+function toVisualOrder(text: string): string {
+  return Array.from(text).reverse().join("");
 }
 
 function drawCentered(
@@ -84,9 +123,11 @@ function fittedSize(text: string, font: PDFFont, size: number): number {
 }
 
 /**
- * Geometric shapes and standard PDF fonts only — no embedded logo images
- * and no custom font embedding, per the Sprint 16 brief. Runs server-side
- * only; never import this from a Client Component.
+ * Geometric shapes and standard PDF fonts for everything except the
+ * participant name / experience title fields, which switch to an embedded
+ * Cairo font when their Arabic form is in use (Sprint 27) — no embedded
+ * logo images otherwise, per the Sprint 16 brief. Runs server-side only;
+ * never import this from a Client Component.
  */
 export async function generateCertificatePdf(input: CertificatePdfInput): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
@@ -98,7 +139,16 @@ export async function generateCertificatePdf(input: CertificatePdfInput): Promis
   const muted = rgb(0.45, 0.45, 0.45);
   const ink = rgb(0.12, 0.12, 0.12);
 
-  const { regular, bold } = await loadFonts(pdfDoc, input.fontFamily);
+  const { regular, bold } = await loadStandardFonts(pdfDoc, input.fontFamily);
+
+  const needsCairo = input.participantNameIsArabic || input.experienceTitleIsArabic;
+  const cairo = needsCairo ? await loadCairoFonts(pdfDoc) : null;
+
+  const participantFont = input.participantNameIsArabic && cairo ? cairo.bold : bold;
+  const participantText = input.participantNameIsArabic ? toVisualOrder(input.participantName) : input.participantName;
+
+  const experienceFont = input.experienceTitleIsArabic && cairo ? cairo.bold : bold;
+  const experienceText = input.experienceTitleIsArabic ? toVisualOrder(input.experienceTitle) : input.experienceTitle;
 
   page.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: background });
 
@@ -130,10 +180,10 @@ export async function generateCertificatePdf(input: CertificatePdfInput): Promis
   drawCentered(page, input.titleText, 432, bold, 34, secondary);
 
   drawCentered(page, input.bodyText, 384, regular, 14, muted);
-  drawCentered(page, input.participantName, 348, bold, fittedSize(input.participantName, bold, 28), ink);
+  drawCentered(page, participantText, 348, participantFont, fittedSize(participantText, participantFont, 28), ink);
 
   drawCentered(page, "for successfully completing", 310, regular, 13, muted);
-  drawCentered(page, input.experienceTitle, 276, bold, fittedSize(input.experienceTitle, bold, 20), primary);
+  drawCentered(page, experienceText, 276, experienceFont, fittedSize(experienceText, experienceFont, 20), primary);
 
   drawCentered(page, `Completed on ${formatCompletionDate(input.completionDate)}`, 240, regular, 11, muted);
 
@@ -177,7 +227,9 @@ export type UploadedCertificateInput = {
   uploadedPdfPath: string;
   fieldPlacements: FieldPlacements;
   participantName: string;
+  participantNameIsArabic: boolean;
   experienceTitle: string;
+  experienceTitleIsArabic: boolean;
   organizationName: string;
   completionDate: string;
   verificationCode: string;
@@ -192,6 +244,14 @@ const FIELD_VALUE_MAP: Record<
   completion_date: (input) => formatCompletionDate(input.completionDate),
   organization_name: (input) => input.organizationName,
   verification_code: (input) => input.verificationCode,
+};
+
+/** Only these two fields can ever be Arabic (see UploadedCertificateInput) —
+ * organization name, completion date, and verification code stay Latin
+ * script per the Sprint 27 brief. */
+const ARABIC_ELIGIBLE_FIELDS: Partial<Record<keyof FieldPlacements, (input: UploadedCertificateInput) => boolean>> = {
+  participant_name: (input) => input.participantNameIsArabic,
+  experience_title: (input) => input.experienceTitleIsArabic,
 };
 
 /**
@@ -215,15 +275,28 @@ export async function generateCertificateFromUpload(input: UploadedCertificateIn
 
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
+  const needsCairo = input.participantNameIsArabic || input.experienceTitleIsArabic;
+  // Loaded lazily on first Arabic field, not unconditionally — matches
+  // generateCertificatePdf's reasoning for why an all-English certificate
+  // shouldn't pay for the CDN fetch.
+  const cairo = needsCairo ? await loadCairoFonts(pdfDoc) : null;
+
   for (const key of Object.keys(input.fieldPlacements) as (keyof FieldPlacements)[]) {
     const placement = input.fieldPlacements[key];
-    const text = FIELD_VALUE_MAP[key](input);
+    let text = FIELD_VALUE_MAP[key](input);
 
     if (!text) {
       continue;
     }
 
-    const width = font.widthOfTextAtSize(text, placement.font_size);
+    const isArabicField = ARABIC_ELIGIBLE_FIELDS[key]?.(input) ?? false;
+    let fieldFont = font;
+    if (isArabicField && cairo) {
+      fieldFont = cairo.regular;
+      text = toVisualOrder(text);
+    }
+
+    const width = fieldFont.widthOfTextAtSize(text, placement.font_size);
     let x = placement.x;
     if (placement.align === "center") {
       x = placement.x - width / 2;
@@ -235,7 +308,7 @@ export async function generateCertificateFromUpload(input: UploadedCertificateIn
       x,
       y: placement.y,
       size: placement.font_size,
-      font,
+      font: fieldFont,
       color: hexToRgb(placement.color),
     });
   }

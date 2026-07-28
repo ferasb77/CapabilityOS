@@ -37,7 +37,17 @@ export const participantSchema = z.object({
     .trim()
     .min(2, "Job title is required"),
 
-
+  // Optional — only ever populated when the participant checks in with
+  // Arabic selected (see the language toggle on /r/[slug]). English name
+  // fields above stay required regardless of language.
+  firstNameAr: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().trim().optional()
+  ),
+  lastNameAr: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().trim().optional()
+  ),
 });
 
 export type ParticipantInput = z.infer<typeof participantSchema>;

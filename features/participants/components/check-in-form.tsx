@@ -1,6 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
+import { AR } from "@/lib/i18n/ar";
+import { useLanguage } from "@/lib/i18n/language-context";
 import { checkInParticipant } from "../actions";
 import { SuccessScreen } from "./success-screen";
 import type { CheckInResult } from "../types";
@@ -9,6 +11,9 @@ const initialState: CheckInResult = {
   success: false,
   message: "",
 };
+
+const FIELD_CLASS =
+  "w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-black placeholder:text-slate-400 transition outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200";
 
 export function CheckInForm({
   workshopSlug,
@@ -21,6 +26,9 @@ export function CheckInForm({
     checkInParticipant,
     initialState
   );
+  const { language } = useLanguage();
+  const isAr = language === "ar";
+  const t = AR.checkin;
 
   if (state.success) {
     return <SuccessScreen materialsUrl={state.materialsUrl} />;
@@ -36,11 +44,11 @@ export function CheckInForm({
 
       <div>
         <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-          {experienceTypeLabel} Check-In
+          {isAr ? t.heading : `${experienceTypeLabel} Check-In`}
         </h2>
 
         <p className="mt-2 text-sm text-slate-500">
-          Please complete the information below.
+          {isAr ? t.subtitle : "Please complete the information below."}
         </p>
       </div>
 
@@ -49,7 +57,7 @@ export function CheckInForm({
           htmlFor="firstName"
           className="text-sm font-medium text-slate-700"
         >
-          First Name <span className="text-red-500">*</span>
+          {isAr ? t.firstNameLabel : "First Name"} <span className="text-red-500">*</span>
         </label>
 
         <input
@@ -57,7 +65,7 @@ export function CheckInForm({
           name="firstName"
           autoComplete="given-name"
           required
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-black placeholder:text-slate-400 transition outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+          className={FIELD_CLASS}
         />
       </div>
 
@@ -66,7 +74,7 @@ export function CheckInForm({
           htmlFor="lastName"
           className="text-sm font-medium text-slate-700"
         >
-          Last Name <span className="text-red-500">*</span>
+          {isAr ? t.lastNameLabel : "Last Name"} <span className="text-red-500">*</span>
         </label>
 
         <input
@@ -74,16 +82,46 @@ export function CheckInForm({
           name="lastName"
           autoComplete="family-name"
           required
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-black placeholder:text-slate-400 transition outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+          className={FIELD_CLASS}
         />
       </div>
+
+      {isAr && (
+        <>
+          <div className="space-y-2">
+            <label htmlFor="firstNameAr" className="text-sm font-medium text-slate-700">
+              {t.firstNameArLabel}{" "}
+              <span className="text-slate-400">({t.optionalHint})</span>
+            </label>
+            <input
+              id="firstNameAr"
+              name="firstNameAr"
+              dir="rtl"
+              className={`${FIELD_CLASS} font-cairo placeholder:text-right`}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="lastNameAr" className="text-sm font-medium text-slate-700">
+              {t.lastNameArLabel}{" "}
+              <span className="text-slate-400">({t.optionalHint})</span>
+            </label>
+            <input
+              id="lastNameAr"
+              name="lastNameAr"
+              dir="rtl"
+              className={`${FIELD_CLASS} font-cairo placeholder:text-right`}
+            />
+          </div>
+        </>
+      )}
 
       <div className="space-y-2">
         <label
           htmlFor="email"
           className="text-sm font-medium text-slate-700"
         >
-          Email Address <span className="text-red-500">*</span>
+          {isAr ? t.emailLabel : "Email Address"} <span className="text-red-500">*</span>
         </label>
 
         <input
@@ -92,7 +130,8 @@ export function CheckInForm({
           name="email"
           autoComplete="email"
           required
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-black placeholder:text-slate-400 transition outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+          dir="ltr"
+          className={FIELD_CLASS}
         />
       </div>
 
@@ -101,7 +140,7 @@ export function CheckInForm({
           htmlFor="mobile"
           className="text-sm font-medium text-slate-700"
         >
-          Mobile Number <span className="text-red-500">*</span>
+          {isAr ? t.mobileLabel : "Mobile Number"} <span className="text-red-500">*</span>
         </label>
 
         <input
@@ -109,7 +148,8 @@ export function CheckInForm({
           name="mobile"
           autoComplete="tel"
           required
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-black placeholder:text-slate-400 transition outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+          dir="ltr"
+          className={FIELD_CLASS}
         />
       </div>
 
@@ -118,7 +158,7 @@ export function CheckInForm({
           htmlFor="company"
           className="text-sm font-medium text-slate-700"
         >
-          Company <span className="text-red-500">*</span>
+          {isAr ? t.companyLabel : "Company"} <span className="text-red-500">*</span>
         </label>
 
         <input
@@ -126,7 +166,7 @@ export function CheckInForm({
           name="company"
           autoComplete="organization"
           required
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-black placeholder:text-slate-400 transition outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+          className={FIELD_CLASS}
         />
       </div>
 
@@ -135,7 +175,7 @@ export function CheckInForm({
           htmlFor="jobTitle"
           className="text-sm font-medium text-slate-700"
         >
-          Job Title <span className="text-red-500">*</span>
+          {isAr ? t.jobTitleLabel : "Job Title"} <span className="text-red-500">*</span>
         </label>
 
         <input
@@ -143,7 +183,7 @@ export function CheckInForm({
           name="jobTitle"
           autoComplete="organization-title"
           required
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-black placeholder:text-slate-400 transition outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+          className={FIELD_CLASS}
         />
       </div>
 
@@ -157,7 +197,7 @@ export function CheckInForm({
         disabled={pending}
         className="mt-4 w-full rounded-xl bg-[#C8A24A] py-4 text-base font-semibold text-[#0B1018] transition-all duration-200 hover:bg-[#D9B765] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {pending ? "Checking You In..." : "Complete Check-In"}
+        {pending ? (isAr ? t.submitting : "Checking You In...") : isAr ? t.submit : "Complete Check-In"}
       </button>
     </form>
   );

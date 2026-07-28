@@ -1,5 +1,9 @@
+"use client";
+
 import { CircleCheck } from "lucide-react";
 
+import { AR } from "@/lib/i18n/ar";
+import { useLanguage } from "@/lib/i18n/language-context";
 import type { SurveyType } from "@/features/surveys/schema";
 
 const THANK_YOU_COPY: Record<SurveyType, { heading: string; body: string }> = {
@@ -22,13 +26,19 @@ type Props = {
 };
 
 export function SurveyThankYou({ surveyType = "satisfaction" }: Props) {
+  const { language } = useLanguage();
+  const isAr = language === "ar";
   const copy = THANK_YOU_COPY[surveyType];
 
   return (
     <div className="flex flex-col items-center py-12 text-center">
       <CircleCheck className="mb-6 size-16 text-gold" strokeWidth={1.5} />
-      <h1 className="font-heading text-2xl font-semibold text-ivory sm:text-3xl">{copy.heading}</h1>
-      <p className="mt-4 max-w-sm text-sm text-muted-foreground">{copy.body}</p>
+      <h1 className="font-heading text-2xl font-semibold text-ivory sm:text-3xl">
+        {isAr ? AR.survey.thankYouHeading : copy.heading}
+      </h1>
+      <p className="mt-4 max-w-sm text-sm text-muted-foreground">
+        {isAr ? AR.survey.responseRecorded : copy.body}
+      </p>
       <p className="mt-10 text-xs tracking-[0.3em] text-gold/70 uppercase">Enable My Growth</p>
     </div>
   );

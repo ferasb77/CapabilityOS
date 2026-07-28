@@ -16,6 +16,7 @@ export type ExperienceOption = { id: string; title: string; clientId: string | n
 
 export type CheckinExperienceContext = {
   title: string;
+  titleAr: string | null;
   experienceType: ExperienceType;
   venue: string | null;
   startDate: string;
@@ -24,6 +25,7 @@ export type CheckinExperienceContext = {
 
 type CheckinContextRpcRow = {
   title: string;
+  title_ar: string | null;
   experience_type: ExperienceType;
   venue: string | null;
   start_date: string;
@@ -52,6 +54,7 @@ export async function getCheckinContextBySlug(slug: string): Promise<CheckinExpe
 
   return {
     title: row.title,
+    titleAr: row.title_ar,
     experienceType: row.experience_type,
     venue: row.venue,
     startDate: row.start_date,
@@ -87,6 +90,7 @@ export type ExperienceDetailRecord = {
   id: string;
   slug: string;
   title: string;
+  titleAr: string | null;
   description: string | null;
   experienceType: ExperienceType;
   programType: string | null;
@@ -117,6 +121,7 @@ type ExperienceRow = {
   id: string;
   slug: string;
   title: string;
+  title_ar: string | null;
   description: string | null;
   experience_type: ExperienceType;
   program_type: string | null;
@@ -145,13 +150,14 @@ type ExperienceRow = {
 };
 
 const EXPERIENCE_DETAIL_SELECT =
-  "id, slug, title, description, experience_type, program_type, tags, status, start_date, end_date, venue, city, country, capacity, client_id, engagement_id, client_name, client_contact_name, client_contact_email, facilitator_name, facilitator_email, facilitator_notes, materials_notes, logistics_notes, created_at, updated_at, clients(name), engagements(title)";
+  "id, slug, title, title_ar, description, experience_type, program_type, tags, status, start_date, end_date, venue, city, country, capacity, client_id, engagement_id, client_name, client_contact_name, client_contact_email, facilitator_name, facilitator_email, facilitator_notes, materials_notes, logistics_notes, created_at, updated_at, clients(name), engagements(title)";
 
 function mapExperience(row: ExperienceRow): ExperienceDetailRecord {
   return {
     id: row.id,
     slug: row.slug,
     title: row.title,
+    titleAr: row.title_ar,
     description: row.description,
     experienceType: row.experience_type,
     programType: row.program_type,

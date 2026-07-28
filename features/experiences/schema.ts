@@ -76,6 +76,7 @@ const experienceFieldsSchema = z.object({
 
   // Section 2 — Program Details
   title: z.string().trim().min(1, "Title is required"),
+  titleAr: z.preprocess(emptyToUndefined, z.string().trim().optional()),
   experienceType: z.enum(EXPERIENCE_TYPES).default("workshop"),
   description: z.string().trim().optional(),
   tags: z

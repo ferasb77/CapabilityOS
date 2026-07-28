@@ -24,6 +24,7 @@ export type CreateExperienceResult =
 
 const FORM_FIELDS = [
   "title",
+  "titleAr",
   "experienceType",
   "description",
   "tags",
@@ -129,6 +130,7 @@ export async function createExperience(
     .from("experiences")
     .insert({
       title: data.title,
+      title_ar: data.titleAr || null,
       experience_type: data.experienceType,
       description: data.description || null,
       tags: data.tags,
@@ -270,6 +272,7 @@ export async function updateExperience(
     .from("experiences")
     .update({
       title: data.title,
+      title_ar: data.titleAr || null,
       experience_type: data.experienceType,
       description: data.description || null,
       tags: data.tags,

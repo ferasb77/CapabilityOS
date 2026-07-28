@@ -288,6 +288,19 @@ export function ExperienceEditForm({
           </p>
         </div>
 
+        <div className="space-y-2 sm:col-span-2">
+          <Label htmlFor="titleAr">Arabic Title / العنوان بالعربية</Label>
+          <Input
+            id="titleAr"
+            name="titleAr"
+            dir="rtl"
+            className="font-cairo placeholder:text-right"
+            placeholder="العنوان بالعربية"
+            disabled={readOnly}
+            defaultValue={field("titleAr", experience.titleAr ?? "")}
+          />
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="experienceType">Experience type</Label>
           <Select

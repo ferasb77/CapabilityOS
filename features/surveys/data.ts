@@ -266,6 +266,11 @@ export type SurveyQuestion = {
   options: string[] | null;
   lowLabel: string | null;
   highLabel: string | null;
+  questionTextAr: string | null;
+  descriptionAr: string | null;
+  optionsAr: string[] | null;
+  lowLabelAr: string | null;
+  highLabelAr: string | null;
 };
 
 export type SurveyTemplateSummary = {
@@ -304,6 +309,11 @@ type QuestionRow = {
   options: string[] | null;
   low_label: string | null;
   high_label: string | null;
+  question_text_ar: string | null;
+  description_ar: string | null;
+  options_ar: string[] | null;
+  low_label_ar: string | null;
+  high_label_ar: string | null;
 };
 
 function mapQuestion(row: QuestionRow): SurveyQuestion {
@@ -318,11 +328,16 @@ function mapQuestion(row: QuestionRow): SurveyQuestion {
     options: row.options,
     lowLabel: row.low_label,
     highLabel: row.high_label,
+    questionTextAr: row.question_text_ar,
+    descriptionAr: row.description_ar,
+    optionsAr: row.options_ar,
+    lowLabelAr: row.low_label_ar,
+    highLabelAr: row.high_label_ar,
   };
 }
 
 const QUESTION_SELECT =
-  "id, template_id, order_index, question_type, question_text, description, is_required, options, low_label, high_label";
+  "id, template_id, order_index, question_type, question_text, description, is_required, options, low_label, high_label, question_text_ar, description_ar, options_ar, low_label_ar, high_label_ar";
 
 export async function getSurveyTemplates(
   workspaceId: string,

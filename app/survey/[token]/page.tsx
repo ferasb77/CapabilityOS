@@ -1,6 +1,7 @@
 import { SurveyForm } from "@/features/surveys/components/survey-form";
 import { CustomSurveyForm } from "@/features/surveys/components/custom-survey-form";
 import { SurveyThankYou } from "@/features/surveys/components/survey-thank-you";
+import { SurveyPageShell } from "@/features/surveys/components/survey-page-shell";
 import type { PublicSurveyQuestion } from "@/features/surveys/components/question-renderer";
 import { SURVEY_TYPES, type SurveyType } from "@/features/surveys/schema";
 import { createClient } from "@/infrastructure/supabase/server";
@@ -15,6 +16,11 @@ type RawSurveyQuestion = {
   options: string[] | null;
   low_label: string | null;
   high_label: string | null;
+  question_text_ar: string | null;
+  description_ar: string | null;
+  options_ar: string[] | null;
+  low_label_ar: string | null;
+  high_label_ar: string | null;
 };
 
 type SurveyContextRow = {
@@ -23,6 +29,7 @@ type SurveyContextRow = {
   experience_id: string;
   participant_first_name: string | null;
   experience_title: string | null;
+  experience_title_ar: string | null;
   organization_name: string | null;
   already_completed: boolean;
   template_id: string | null;
@@ -40,6 +47,11 @@ function toPublicQuestion(row: RawSurveyQuestion): PublicSurveyQuestion {
     options: row.options,
     lowLabel: row.low_label,
     highLabel: row.high_label,
+    questionTextAr: row.question_text_ar,
+    descriptionAr: row.description_ar,
+    optionsAr: row.options_ar,
+    lowLabelAr: row.low_label_ar,
+    highLabelAr: row.high_label_ar,
   };
 }
 
@@ -86,27 +98,30 @@ export default async function SurveyPage({ params, searchParams }: Props) {
         {!context ? (
           <InvalidState />
         ) : (
-          <div className="rounded-2xl border border-border-subtle bg-surface p-6 sm:p-10">
-            {context.already_completed ? (
-              <SurveyThankYou surveyType={surveyType} />
-            ) : context.questions && context.questions.length > 0 ? (
-              <CustomSurveyForm
-                token={token}
-                participantFirstName={context.participant_first_name ?? "there"}
-                experienceTitle={context.experience_title ?? "the experience"}
-                questions={context.questions.map(toPublicQuestion)}
-                surveyType={surveyType}
-              />
-            ) : surveyType === "satisfaction" ? (
-              <SurveyForm
-                token={token}
-                participantFirstName={context.participant_first_name ?? "there"}
-                experienceTitle={context.experience_title ?? "the experience"}
-              />
-            ) : (
-              <NotConfiguredState surveyType={surveyType} experienceTitle={context.experience_title} />
-            )}
-          </div>
+          <SurveyPageShell>
+            <div className="rounded-2xl border border-border-subtle bg-surface p-6 sm:p-10">
+              {context.already_completed ? (
+                <SurveyThankYou surveyType={surveyType} />
+              ) : context.questions && context.questions.length > 0 ? (
+                <CustomSurveyForm
+                  token={token}
+                  participantFirstName={context.participant_first_name ?? "there"}
+                  experienceTitle={context.experience_title ?? "the experience"}
+                  experienceTitleAr={context.experience_title_ar}
+                  questions={context.questions.map(toPublicQuestion)}
+                  surveyType={surveyType}
+                />
+              ) : surveyType === "satisfaction" ? (
+                <SurveyForm
+                  token={token}
+                  participantFirstName={context.participant_first_name ?? "there"}
+                  experienceTitle={context.experience_title ?? "the experience"}
+                />
+              ) : (
+                <NotConfiguredState surveyType={surveyType} experienceTitle={context.experience_title} />
+              )}
+            </div>
+          </SurveyPageShell>
         )}
       </div>
     </main>
