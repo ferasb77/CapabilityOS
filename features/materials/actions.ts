@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireEnv } from "@/infrastructure/env";
+import { validateFileType } from "@/lib/file-validation";
 import { getResendClient, getResendFromAddress } from "@/infrastructure/email/resend-client";
 import { renderMaterialsLinkEmail, renderMaterialsReadyEmail } from "@/infrastructure/email/materials-email";
 import { createClient } from "@/infrastructure/supabase/server";
@@ -263,6 +264,11 @@ export async function addMaterial(
       return { success: false, error: "File must be under 50MB." };
     }
 
+    const typeCheck = await validateFileType(file);
+    if (!typeCheck.valid) {
+      return { success: false, error: "File type not supported. Please upload PDF, PPTX, DOCX, XLSX, or image files only." };
+    }
+
     const bytes = new Uint8Array(await file.arrayBuffer());
     try {
       filePath = await uploadMaterialFile(
@@ -355,6 +361,11 @@ export async function updateMaterial(
     if (file instanceof File && file.size > 0) {
       if (file.size > MAX_MATERIAL_FILE_BYTES) {
         return { success: false, error: "File must be under 50MB." };
+      }
+
+      const typeCheck = await validateFileType(file);
+      if (!typeCheck.valid) {
+        return { success: false, error: "File type not supported. Please upload PDF, PPTX, DOCX, XLSX, or image files only." };
       }
 
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -514,6 +525,11 @@ export async function addFacilitatorMaterial(
   }
   if (file.size > MAX_MATERIAL_FILE_BYTES) {
     return { success: false, error: "File must be under 50MB." };
+  }
+
+  const typeCheck = await validateFileType(file);
+  if (!typeCheck.valid) {
+    return { success: false, error: "File type not supported. Please upload PDF, PPTX, DOCX, XLSX, or image files only." };
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());

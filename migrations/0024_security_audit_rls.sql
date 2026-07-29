@@ -1,0 +1,13 @@
+-- Sprint 28 security hardening: RLS audit.
+--
+-- Audit query (run against pg_tables where schemaname = 'public') showed
+-- every public-schema table already has RLS enabled with policies — no
+-- gaps found there.
+--
+-- The one gap found lives outside the app's schema: a legacy, unreferenced
+-- `workshop` schema (not used by any application code — the Supabase
+-- clients in infrastructure/supabase/ all use the default `public` schema)
+-- had one table, program_versions, with RLS disabled entirely. Enabled
+-- defensively; the schema holds only a handful of stale rows and nothing
+-- in this codebase queries it.
+alter table workshop.program_versions enable row level security;

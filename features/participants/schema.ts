@@ -41,11 +41,11 @@ export const participantSchema = z.object({
   // Arabic selected (see the language toggle on /r/[slug]). English name
   // fields above stay required regardless of language.
   firstNameAr: z.preprocess(
-    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    (value) => (value === null || (typeof value === "string" && value.trim() === "") ? undefined : value),
     z.string().trim().optional()
   ),
   lastNameAr: z.preprocess(
-    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    (value) => (value === null || (typeof value === "string" && value.trim() === "") ? undefined : value),
     z.string().trim().optional()
   ),
 });

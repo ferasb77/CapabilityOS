@@ -9,6 +9,7 @@ import { getResendClient, getResendFromAddress } from "@/infrastructure/email/re
 import { renderCertificateEmail } from "@/infrastructure/email/certificate-email";
 import { createClient } from "@/infrastructure/supabase/server";
 import { createServiceRoleClient } from "@/infrastructure/supabase/service-role";
+import { validateFileType } from "@/lib/file-validation";
 
 import { getExperienceCertificates } from "./data";
 import { generateCertificateFromUpload, generateCertificatePdf } from "./pdf";
@@ -808,6 +809,11 @@ export async function uploadCertificateTemplatePdf(
   }
   if (file.size > MAX_TEMPLATE_PDF_BYTES) {
     return { success: false, error: "File must be under 10MB." };
+  }
+
+  const typeCheck = await validateFileType(file, ["application/pdf"]);
+  if (!typeCheck.valid) {
+    return { success: false, error: "Only PDF files are supported." };
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
