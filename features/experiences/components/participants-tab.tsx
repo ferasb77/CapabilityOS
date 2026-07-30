@@ -18,6 +18,8 @@ import { SendAllSurveysButton } from "@/features/surveys/components/send-all-sur
 import { SendSurveyButton } from "@/features/surveys/components/send-survey-button";
 import { SurveyStatusBadge } from "@/features/surveys/components/survey-status-badge";
 import type { ExperienceDetailRecord, ExperienceParticipant } from "@/features/experiences/data";
+import { ParticipantObservationSheet } from "@/features/observations/components/participant-observation-sheet";
+import type { ObservationTag, ParticipantObservation } from "@/features/observations/data";
 
 import { CopyLinkButton } from "./copy-link-button";
 
@@ -60,9 +62,19 @@ type Props = {
   participants: ExperienceParticipant[];
   /** null when the experience is completed/cancelled — registration has ended, so no link to share. */
   registrationUrl: string | null;
+  observationTags: ObservationTag[];
+  observations: ParticipantObservation[];
+  defaultFacilitatorName: string;
 };
 
-export function ParticipantsTab({ experience, participants, registrationUrl }: Props) {
+export function ParticipantsTab({
+  experience,
+  participants,
+  registrationUrl,
+  observationTags,
+  observations,
+  defaultFacilitatorName,
+}: Props) {
   const total = participants.length;
 
   if (total === 0) {
@@ -137,7 +149,18 @@ export function ParticipantsTab({ experience, participants, registrationUrl }: P
                 {participants.map((participant) => (
                   <TableRow key={participant.id}>
                     <TableCell className="font-medium">
-                      {participant.firstName} {participant.lastName}
+                      <ParticipantObservationSheet
+                        experienceId={experience.id}
+                        participant={participant}
+                        allTags={observationTags}
+                        myObservation={
+                          observations.find(
+                            (o) => o.participantId === participant.id && o.facilitatorName === defaultFacilitatorName
+                          ) ?? null
+                        }
+                        otherObservations={observations.filter((o) => o.participantId === participant.id)}
+                        defaultFacilitatorName={defaultFacilitatorName}
+                      />
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {participant.company ?? "—"}
@@ -179,9 +202,18 @@ export function ParticipantsTab({ experience, participants, registrationUrl }: P
                 className="rounded-lg border border-border-subtle bg-night/40 p-3"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <p className="font-medium text-ivory">
-                    {participant.firstName} {participant.lastName}
-                  </p>
+                  <ParticipantObservationSheet
+                    experienceId={experience.id}
+                    participant={participant}
+                    allTags={observationTags}
+                    myObservation={
+                      observations.find(
+                        (o) => o.participantId === participant.id && o.facilitatorName === defaultFacilitatorName
+                      ) ?? null
+                    }
+                    otherObservations={observations.filter((o) => o.participantId === participant.id)}
+                    defaultFacilitatorName={defaultFacilitatorName}
+                  />
                   <CheckInBadge checkedIn={participant.checkedIn} />
                 </div>
                 {participant.company || participant.jobTitle ? (

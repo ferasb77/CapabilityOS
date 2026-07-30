@@ -30,6 +30,13 @@ import {
   getExperienceCompletionCriteria,
 } from "@/features/certificates/data";
 import { getSessionContext } from "@/infrastructure/session/session-context";
+import { ObservationsTab } from "@/features/observations/components/observations-tab";
+import {
+  getAllParticipantObservations,
+  getExperienceObservation,
+  getFacilitatorReport,
+  getObservationTags,
+} from "@/features/observations/data";
 import { LogisticsTab } from "@/features/experiences/components/logistics-tab";
 import { ParticipantsTab } from "@/features/experiences/components/participants-tab";
 import { RegistrationLinkPanel } from "@/features/experiences/components/registration-link-panel";
@@ -79,6 +86,27 @@ export default async function ExperienceDetailPage({ params, searchParams }: Pro
   // to Participants still works even if, say, the logistics table isn't
   // there yet.
   const participants = await getExperienceParticipants(experience.id);
+
+  // Observation tags/rows are needed on both the Participants tab (clickable
+  // names, per-participant tag chips) and the Observations tab itself, so
+  // they're fetched alongside participants rather than gated per-tab.
+  const session = await getSessionContext();
+  const defaultFacilitatorName = session.fullName ?? "";
+  const [observationTags, participantObservations] = await Promise.all([
+    getObservationTags(experience.id),
+    getAllParticipantObservations(experience.id),
+  ]);
+
+  const observationsTabData =
+    activeTab === "observations"
+      ? await (async () => {
+          const [myExperienceObservation, facilitatorReport] = await Promise.all([
+            getExperienceObservation(experience.id),
+            getFacilitatorReport(experience.id),
+          ]);
+          return { myExperienceObservation, facilitatorReport };
+        })()
+      : null;
 
   const surveyResults =
     activeTab === "survey" ? await getExperienceSurveyResults(experience.id) : null;
@@ -259,6 +287,9 @@ export default async function ExperienceDetailPage({ params, searchParams }: Pro
           experience={experience}
           participants={participants}
           registrationUrl={registrationOpen ? registrationUrl : null}
+          observationTags={observationTags}
+          observations={participantObservations}
+          defaultFacilitatorName={defaultFacilitatorName}
         />
       )}
 
@@ -360,6 +391,18 @@ export default async function ExperienceDetailPage({ params, searchParams }: Pro
           workspaceId={assetsTabData.workspaceId}
           assignedAssets={assetsTabData.assignedAssets}
           availableAssets={assetsTabData.availableAssets}
+        />
+      )}
+
+      {activeTab === "observations" && observationsTabData && (
+        <ObservationsTab
+          experienceId={experience.id}
+          observationTags={observationTags}
+          participants={participants}
+          participantObservations={participantObservations}
+          myExperienceObservation={observationsTabData.myExperienceObservation}
+          defaultFacilitatorName={defaultFacilitatorName}
+          initialReport={observationsTabData.facilitatorReport}
         />
       )}
     </div>
