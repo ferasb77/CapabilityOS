@@ -407,7 +407,7 @@ function drawDimensionSection(
       page.drawRectangle({ x, y: baseline, width: barWidth, height: barPixelHeight, color: colors.secondary });
     }
 
-    const label = `${star}★ (${count})`;
+    const label = `${star} star (${count})`;
     const labelWidth = fonts.regular.widthOfTextAtSize(label, SIZE.caption);
     page.drawText(label, {
       x: x + (barWidth - labelWidth) / 2,
