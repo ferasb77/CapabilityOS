@@ -18,8 +18,6 @@ import { generateFacilitatorReportPdf } from "@/features/observations/report";
 import { invitePortalUserSchema } from "./schema";
 import { getClientExperienceDetail, getClientPortalSessionContext, getClientSatisfaction, getClientFacilitatorReport } from "./data";
 
-type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
-
 function acceptUrlFor(token: string): string {
   return `${requireEnv("NEXT_PUBLIC_APP_URL").replace(/\/$/, "")}/client-portal/accept?token=${token}`;
 }
@@ -45,10 +43,25 @@ async function sendInvitationEmail(inviterName: string, email: string, token: st
   return null;
 }
 
+/**
+ * Always uses the service-role client, never the session-bound one — the
+ * `workspaces` table's RLS only grants SELECT to sessions that resolve
+ * against `profiles` ("Users see their own workspace" / "Members can view
+ * workspaces in their organization"), and a client portal user has no
+ * `profiles` row at all. Under the session-bound client this query silently
+ * returned zero rows for every portal user, which is what surfaced as
+ * "Client not found" on both PDF downloads below — not a broken
+ * experience→client join (that check, in getClientExperienceDetail, was
+ * already passing). Safe to bypass RLS here: every caller has already
+ * established the caller is allowed to know this client's workspace/org id
+ * (an authenticated operator, or a portal user whose own clientId was just
+ * validated against the requested experience).
+ */
 async function resolveClientWorkspace(
-  supabase: SupabaseServerClient,
   clientId: string
 ): Promise<{ workspaceId: string; organizationId: string } | null> {
+  const supabase = createServiceRoleClient();
+
   const { data: clientRow, error: clientError } = await supabase
     .from("clients")
     .select("workspace_id")
@@ -91,7 +104,7 @@ export async function inviteClientPortalUser(
   const session = await getSessionContext();
   const supabase = await createClient();
 
-  const workspace = await resolveClientWorkspace(supabase, clientId);
+  const workspace = await resolveClientWorkspace(clientId);
   if (!workspace) {
     return { success: false, error: "Client not found." };
   }
@@ -389,14 +402,13 @@ function slugifyFilename(value: string): string {
 
 export async function downloadSatisfactionReportPdf(experienceId: string): Promise<DownloadPdfResult> {
   const portalUser = await getClientPortalSessionContext();
-  const supabase = await createClient();
 
   const experience = await getClientExperienceDetail(experienceId, portalUser.clientId);
   if (!experience) {
     return { success: false, error: "Program not found." };
   }
 
-  const workspace = await resolveClientWorkspace(supabase, portalUser.clientId);
+  const workspace = await resolveClientWorkspace(portalUser.clientId);
   if (!workspace) {
     return { success: false, error: "Client not found." };
   }
@@ -447,7 +459,6 @@ export async function downloadSatisfactionReportPdf(experienceId: string): Promi
 
 export async function downloadFacilitatorReportPdf(experienceId: string): Promise<DownloadPdfResult> {
   const portalUser = await getClientPortalSessionContext();
-  const supabase = await createClient();
 
   const experience = await getClientExperienceDetail(experienceId, portalUser.clientId);
   if (!experience) {
@@ -459,7 +470,7 @@ export async function downloadFacilitatorReportPdf(experienceId: string): Promis
     return { success: false, error: "The facilitator report isn't ready for download yet." };
   }
 
-  const workspace = await resolveClientWorkspace(supabase, portalUser.clientId);
+  const workspace = await resolveClientWorkspace(portalUser.clientId);
   if (!workspace) {
     return { success: false, error: "Client not found." };
   }
