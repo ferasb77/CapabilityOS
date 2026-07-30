@@ -537,23 +537,10 @@ function drawClosingPage(
   const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   const centerX = PAGE_WIDTH / 2;
 
-  let y = PAGE_HEIGHT / 2 + 120;
+  let y = PAGE_HEIGHT / 2 + 60;
 
   page.drawLine({ start: { x: centerX - 40, y }, end: { x: centerX + 40, y }, thickness: 2, color: colors.secondary });
   y -= 40;
-
-  const thankYouSize = SIZE.sectionHeader + 2;
-  for (const line of wrapText(
-    "Thank you for participating in this evaluation. Your feedback helps us continuously improve the quality of our programs.",
-    fonts.bold,
-    thankYouSize,
-    380
-  )) {
-    const width = fonts.bold.widthOfTextAtSize(line, thankYouSize);
-    page.drawText(line, { x: centerX - width / 2, y, font: fonts.bold, size: thankYouSize, color: colors.primary });
-    y -= thankYouSize * LINE_HEIGHT;
-  }
-  y -= 26;
 
   const orgWidth = fonts.bold.widthOfTextAtSize(branding.organizationName, 16);
   page.drawText(branding.organizationName, { x: centerX - orgWidth / 2, y, font: fonts.bold, size: 16, color: colors.primary });
