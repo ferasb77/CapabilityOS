@@ -7,6 +7,7 @@ import { ExperienceStatusBadge } from "@/features/dashboard/components/experienc
 import { SurveyResultsPanel } from "@/features/surveys/components/survey-results-panel";
 import { CustomSurveyResultsPanel } from "@/features/surveys/components/custom-survey-results-panel";
 import { SurveyTab } from "@/features/surveys/components/survey-tab";
+import { GenerateReportButton } from "@/features/reports/components/generate-report-button";
 import { LearningImpactTab } from "@/features/surveys/components/learning-impact-tab";
 import { MaterialsTab } from "@/features/materials/components/materials-tab";
 import { getExperienceMaterials } from "@/features/materials/data";
@@ -46,6 +47,8 @@ function formatDate(value: string) {
     year: "numeric",
   });
 }
+
+const MIN_RESPONSES_FOR_CLIENT_REPORT = 3;
 
 function resolveTab(tab: string | undefined): ExperienceTabKey {
   const match = EXPERIENCE_TABS.find((t) => t.key === tab);
@@ -235,6 +238,14 @@ export default async function ExperienceDetailPage({ params, searchParams }: Pro
 
       {activeTab === "survey" && surveyResults && (
         <div className="space-y-6">
+          {surveyResults.responses.length + (customSurveyResults?.totalResponses ?? 0) >=
+            MIN_RESPONSES_FOR_CLIENT_REPORT && (
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-ivory">Survey Results</h2>
+              <GenerateReportButton experienceId={experience.id} />
+            </div>
+          )}
+
           {customSurveyResults ? (
             <CustomSurveyResultsPanel results={customSurveyResults} />
           ) : (
