@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, Award, ClipboardList, Wallet } from "lucide-react";
+import { ChevronRight, Award, ClipboardList, FileText, Wallet } from "lucide-react";
 
 import {
   Card,
@@ -71,6 +71,19 @@ export default async function SettingsPage() {
             <div>
               <p className="font-medium text-ivory">Certificate Templates</p>
               <p className="text-sm text-muted-foreground">Branding and content for issued certificates.</p>
+            </div>
+          </div>
+          <ChevronRight className="size-4 text-muted-foreground" />
+        </Link>
+        <Link
+          href="/dashboard/settings/reports"
+          className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-surface-elevated p-4 transition-colors hover:border-gold/40"
+        >
+          <div className="flex items-center gap-3">
+            <FileText className="size-5 text-gold" />
+            <div>
+              <p className="font-medium text-ivory">Report Branding</p>
+              <p className="text-sm text-muted-foreground">Logo, colors, and copy for client-facing satisfaction reports.</p>
             </div>
           </div>
           <ChevronRight className="size-4 text-muted-foreground" />

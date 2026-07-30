@@ -31,6 +31,7 @@ import { SendPreSurveyAllButton } from "./send-pre-survey-all-button";
 import { SendPostSurveyAllButton } from "./send-post-survey-all-button";
 import { ResendNonRespondersButton } from "./resend-non-responders-button";
 import { DownloadSurveyResultsButton } from "./download-survey-results-button";
+import { GenerateReportButton } from "@/features/reports/components/generate-report-button";
 import { SurveyResponseModal } from "./survey-response-modal";
 import { SurveyStatusBadge } from "./survey-status-badge";
 import { SurveyTemplateSelector } from "./survey-template-selector";
@@ -196,6 +197,7 @@ export function SurveyTab({ data, templates, templateResolution, surveyConfig }:
           nonResponderCount={nonResponderCount}
         />
         <DownloadSurveyResultsButton experienceId={data.experienceId} experienceSlug={data.experienceSlug} />
+        <GenerateReportButton experienceId={data.experienceId} />
       </div>
 
       <Card className="bg-surface-elevated">
