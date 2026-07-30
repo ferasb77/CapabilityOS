@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 import { createExperience, type CreateExperienceResult } from "../actions";
@@ -152,6 +153,8 @@ export function ExperienceForm({
   );
 
   const showClientSection = clients.length > 0 || engagements.length > 0;
+
+  const [dailyCheckinEnabled, setDailyCheckinEnabled] = useState(field("dailyCheckinEnabled") === "true");
 
   return (
     <form key={formKey} action={action} className="space-y-6" noValidate>
@@ -375,6 +378,22 @@ export function ExperienceForm({
             defaultValue={field("capacity")}
           />
           <FieldError messages={fieldErrors?.capacity} />
+        </div>
+
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-border-subtle bg-night/40 p-4 sm:col-span-2">
+          <div>
+            <Label htmlFor="dailyCheckinEnabledToggle">Enable daily check-in</Label>
+            <p className="mt-1 text-sm text-muted-foreground">
+              When enabled, participants check in each day of a multi-day experience using the same QR
+              code. Attendance is recorded per day.
+            </p>
+          </div>
+          <input type="hidden" name="dailyCheckinEnabled" value={dailyCheckinEnabled ? "true" : "false"} />
+          <Switch
+            id="dailyCheckinEnabledToggle"
+            checked={dailyCheckinEnabled}
+            onCheckedChange={setDailyCheckinEnabled}
+          />
         </div>
       </FormSection>
 

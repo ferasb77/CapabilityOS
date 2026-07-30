@@ -123,11 +123,28 @@ export async function checkInParticipant(
     // already bypass RLS for this same fire-and-forget path.
     const { data: experienceRow } = await supabase
       .rpc("get_experience_for_checkin", { p_slug: parsed.data.workshopSlug })
-      .maybeSingle<{ id: string }>();
+      .maybeSingle<{ id: string; daily_checkin_enabled: boolean }>();
 
     if (experienceRow) {
       void maybeAutoIssueCertificate(insertedParticipant.id, experienceRow.id);
       void sendPreTrainingSurveyOnRegistration(insertedParticipant.id, experienceRow.id);
+
+      // Sprint 30: when daily check-in is on, registering also records Day 1
+      // attendance — the same record_daily_attendance RPC the returning-
+      // participant flow uses, called here with today's date right after
+      // this participant row exists so the RPC's own lookup succeeds. A
+      // failure here must never fail the registration itself.
+      if (experienceRow.daily_checkin_enabled) {
+        try {
+          await supabase.rpc("record_daily_attendance", {
+            p_experience_slug: parsed.data.workshopSlug,
+            p_participant_email: parsed.data.email,
+            p_attendance_date: new Date().toISOString().slice(0, 10),
+          });
+        } catch (attendanceError) {
+          console.error("Failed to record Day 1 attendance", attendanceError);
+        }
+      }
 
       const token = await createOrGetMaterialToken(insertedParticipant.id, experienceRow.id);
       if (token) {

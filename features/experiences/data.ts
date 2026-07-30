@@ -21,6 +21,7 @@ export type CheckinExperienceContext = {
   venue: string | null;
   startDate: string;
   endDate: string;
+  dailyCheckinEnabled: boolean;
 };
 
 type CheckinContextRpcRow = {
@@ -30,6 +31,7 @@ type CheckinContextRpcRow = {
   venue: string | null;
   start_date: string;
   end_date: string;
+  daily_checkin_enabled: boolean;
 };
 
 /**
@@ -59,6 +61,7 @@ export async function getCheckinContextBySlug(slug: string): Promise<CheckinExpe
     venue: row.venue,
     startDate: row.start_date,
     endDate: row.end_date,
+    dailyCheckinEnabled: row.daily_checkin_enabled,
   };
 }
 
@@ -113,6 +116,7 @@ export type ExperienceDetailRecord = {
   facilitatorNotes: string | null;
   materialsNotes: string | null;
   logisticsNotes: string | null;
+  dailyCheckinEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -143,6 +147,7 @@ type ExperienceRow = {
   facilitator_notes: string | null;
   materials_notes: string | null;
   logistics_notes: string | null;
+  daily_checkin_enabled: boolean;
   created_at: string;
   updated_at: string;
   clients: { name: string } | null;
@@ -150,7 +155,7 @@ type ExperienceRow = {
 };
 
 const EXPERIENCE_DETAIL_SELECT =
-  "id, slug, title, title_ar, description, experience_type, program_type, tags, status, start_date, end_date, venue, city, country, capacity, client_id, engagement_id, client_name, client_contact_name, client_contact_email, facilitator_name, facilitator_email, facilitator_notes, materials_notes, logistics_notes, created_at, updated_at, clients(name), engagements(title)";
+  "id, slug, title, title_ar, description, experience_type, program_type, tags, status, start_date, end_date, venue, city, country, capacity, client_id, engagement_id, client_name, client_contact_name, client_contact_email, facilitator_name, facilitator_email, facilitator_notes, materials_notes, logistics_notes, daily_checkin_enabled, created_at, updated_at, clients(name), engagements(title)";
 
 function mapExperience(row: ExperienceRow): ExperienceDetailRecord {
   return {
@@ -180,6 +185,7 @@ function mapExperience(row: ExperienceRow): ExperienceDetailRecord {
     facilitatorNotes: row.facilitator_notes,
     materialsNotes: row.materials_notes,
     logisticsNotes: row.logistics_notes,
+    dailyCheckinEnabled: row.daily_checkin_enabled,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

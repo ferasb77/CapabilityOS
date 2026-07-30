@@ -8,6 +8,8 @@ import { SurveyResultsPanel } from "@/features/surveys/components/survey-results
 import { CustomSurveyResultsPanel } from "@/features/surveys/components/custom-survey-results-panel";
 import { SurveyTab } from "@/features/surveys/components/survey-tab";
 import { GenerateReportButton } from "@/features/reports/components/generate-report-button";
+import { AttendanceTab } from "@/features/attendance/components/attendance-tab";
+import { getDailyAttendanceDetail, getDailyAttendanceSummary } from "@/features/attendance/data";
 import { LearningImpactTab } from "@/features/surveys/components/learning-impact-tab";
 import { MaterialsTab } from "@/features/materials/components/materials-tab";
 import { getExperienceMaterials } from "@/features/materials/data";
@@ -92,6 +94,26 @@ export default async function ExperienceDetailPage({ params, searchParams }: Pro
       : null;
   const logisticsGroups =
     activeTab === "logistics" ? await getExperienceLogisticsTasks(experience.id) : null;
+
+  const attendanceTabData =
+    activeTab === "attendance" && experience.dailyCheckinEnabled
+      ? await (async () => {
+          const summary = await getDailyAttendanceSummary(experience.id);
+          if (!summary) {
+            return null;
+          }
+
+          const details = await Promise.all(
+            summary.days.map((day) => getDailyAttendanceDetail(experience.id, day.date))
+          );
+
+          return {
+            totalDays: summary.totalDays,
+            today: summary.today,
+            days: summary.days.map((day, index) => ({ ...day, participants: details[index] ?? [] })),
+          };
+        })()
+      : null;
 
   const surveysTabData =
     activeTab === "surveys"
@@ -226,13 +248,27 @@ export default async function ExperienceDetailPage({ params, searchParams }: Pro
           the URL and re-renders this Server Component. */}
       {registrationOpen && created !== "true" && <RegistrationLinkPanel url={registrationUrl} />}
 
-      <ExperienceTabs slug={experience.slug} activeTab={activeTab} />
+      <ExperienceTabs
+        slug={experience.slug}
+        activeTab={activeTab}
+        showAttendance={experience.dailyCheckinEnabled}
+      />
 
       {activeTab === "participants" && (
         <ParticipantsTab
           experience={experience}
           participants={participants}
           registrationUrl={registrationOpen ? registrationUrl : null}
+        />
+      )}
+
+      {activeTab === "attendance" && attendanceTabData && (
+        <AttendanceTab
+          experienceId={experience.id}
+          experienceSlug={experience.slug}
+          totalDays={attendanceTabData.totalDays}
+          today={attendanceTabData.today}
+          days={attendanceTabData.days}
         />
       )}
 

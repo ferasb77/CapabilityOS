@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 
 import { AR } from "@/lib/i18n/ar";
 import { LanguageProvider, localize, useLanguage } from "@/lib/i18n/language-context";
 import { LanguageToggle } from "@/lib/i18n/language-toggle";
+import { DailyCheckInForm } from "@/features/attendance/components/daily-checkin-form";
 
 import { CheckInForm } from "./check-in-form";
 
@@ -28,6 +30,7 @@ type Props = {
   eyebrow: string;
   dateRange: string;
   venue: string | null;
+  dailyCheckinEnabled: boolean;
 };
 
 /**
@@ -45,9 +48,10 @@ export function CheckinPageContent(props: Props) {
   );
 }
 
-function CheckinPageBody({ workshopSlug, title, titleAr, eyebrow, dateRange, venue }: Props) {
+function CheckinPageBody({ workshopSlug, title, titleAr, eyebrow, dateRange, venue, dailyCheckinEnabled }: Props) {
   const { language } = useLanguage();
   const displayTitle = localize(language, title, titleAr);
+  const [mode, setMode] = useState<"register" | "checkin">("register");
 
   return (
     <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-8 sm:px-6 sm:py-12 lg:px-12">
@@ -97,7 +101,34 @@ function CheckinPageBody({ workshopSlug, title, titleAr, eyebrow, dateRange, ven
         </section>
 
         <section className="rounded-2xl bg-white p-6 shadow-[0_40px_120px_rgba(0,0,0,0.35)] sm:rounded-[32px] sm:p-10">
-          <CheckInForm workshopSlug={workshopSlug} experienceTypeLabel={eyebrow} />
+          {dailyCheckinEnabled && (
+            <div className="mb-6 flex gap-2 rounded-xl bg-slate-100 p-1 text-sm font-semibold">
+              <button
+                type="button"
+                onClick={() => setMode("register")}
+                className={`flex-1 rounded-lg py-2 transition-colors ${
+                  mode === "register" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                First time here? Register
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("checkin")}
+                className={`flex-1 rounded-lg py-2 transition-colors ${
+                  mode === "checkin" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                Already registered? Check in
+              </button>
+            </div>
+          )}
+
+          {mode === "checkin" && dailyCheckinEnabled ? (
+            <DailyCheckInForm workshopSlug={workshopSlug} onSwitchToRegister={() => setMode("register")} />
+          ) : (
+            <CheckInForm workshopSlug={workshopSlug} experienceTypeLabel={eyebrow} />
+          )}
         </section>
       </div>
     </div>

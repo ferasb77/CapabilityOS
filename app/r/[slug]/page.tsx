@@ -64,6 +64,7 @@ export default async function CheckInPage({ params }: Props) {
         eyebrow={eyebrow}
         dateRange={formatDateRange(experience.startDate, experience.endDate)}
         venue={experience.venue}
+        dailyCheckinEnabled={experience.dailyCheckinEnabled}
       />
     </main>
   );

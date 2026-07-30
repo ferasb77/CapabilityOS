@@ -97,6 +97,10 @@ const experienceFieldsSchema = z.object({
   city: z.string().trim().optional(),
   country: z.preprocess(emptyToUndefined, z.enum(COUNTRIES).optional()),
   capacity: z.coerce.number().int().min(1, "Capacity must be at least 1"),
+  dailyCheckinEnabled: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
 
   // Section 4 — Facilitator
   facilitatorId: z.preprocess(emptyToUndefined, z.string().uuid().optional()),
