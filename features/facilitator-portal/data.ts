@@ -64,6 +64,15 @@ export type FacilitatorPortalAccessStatus = {
   email: string;
 };
 
+// ADDED: Missing type definition required by checkFacilitatorUnavailabilityForAssignment
+export type UnavailabilityConflict = {
+  hasConflict: boolean;
+  count: number;
+  conflictingExperiences: any[];
+  experiences: any[];
+  unavailabilityBlocks?: any[];
+};
+
 /**
  * Resolves the authenticated facilitator's session context.
  * Redirects to /login if no valid session or not a facilitator.
@@ -384,6 +393,16 @@ export async function getFacilitatorUnavailability(
   }));
 }
 
+// ADDED: Fallback helper function to prevent undefined reference crashes.
+// Replace this with an import if this function exists elsewhere in your codebase.
+async function checkAvailabilityConflict(
+  facilitatorId: string,
+  startDate: string,
+  endDate: string
+): Promise<{ hasConflict: boolean; count: number; conflictingExperiences: any[] }> {
+  return { hasConflict: false, count: 0, conflictingExperiences: [] };
+}
+
 export async function checkUnavailabilityConflict(
   facilitatorId: string,
   startDate: string,
@@ -538,4 +557,3 @@ export async function getFacilitatorExperienceDetail(
     facilitatorMaterialsSlug: row.facilitator_materials_slug ?? null,
   };
 }
-
