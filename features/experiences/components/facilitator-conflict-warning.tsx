@@ -7,63 +7,43 @@ import { checkFacilitatorUnavailabilityForAssignment } from "@/features/facilita
 import type { UnavailabilityConflict } from "@/features/facilitator-portal/data";
 
 type Props = {
-  facilitatorId: string;
-  startDate: string;
-  endDate: string;
+  facilitatorId?: string;
+  startDate?: string;
+  endDate?: string;
 };
 
-function toDateOnly(value: string): string {
-  return value.slice(0, 10);
-}
-
-/**
- * "If a facilitator has an unavailability block covering the experience
- * dates, show a warning in the assignment UI" (CLAUDE.md's Sprint 34
- * brief). Non-blocking — the operator can still assign and resolve the
- * conflict with the facilitator directly.
- */
 export function FacilitatorConflictWarning({ facilitatorId, startDate, endDate }: Props) {
-  const start = toDateOnly(startDate);
-  const end = toDateOnly(endDate);
-
-  // Tagged with the (facilitatorId, start, end) it was computed for, rather
-  // than reset to null on every prop change, so a stale result never
-  // renders under a different selection — it simply stops matching below.
-  const [result, setResult] = useState<{ facilitatorId: string; start: string; end: string; conflict: UnavailabilityConflict } | null>(
-    null
-  );
+  const [conflict, setConflict] = useState<UnavailabilityConflict | null>(null);
 
   useEffect(() => {
-    if (!facilitatorId || !start || !end || end < start) {
+    if (!facilitatorId || !startDate || !endDate) {
       return;
     }
 
-    let cancelled = false;
-    checkFacilitatorUnavailabilityForAssignment(facilitatorId, start, end).then((conflict) => {
-      if (!cancelled) setResult({ facilitatorId, start, end, conflict });
+    let isMounted = true;
+    checkFacilitatorUnavailabilityForAssignment(facilitatorId, startDate, endDate).then((res) => {
+      if (isMounted) {
+        setConflict(res);
+      }
     });
 
     return () => {
-      cancelled = true;
+      isMounted = false;
     };
-  }, [facilitatorId, start, end]);
+  }, [facilitatorId, startDate, endDate]);
 
-  const conflict =
-    result && result.facilitatorId === facilitatorId && result.start === start && result.end === end
-      ? result.conflict
-      : null;
-
-  if (!conflict?.hasConflict) {
+  if (!facilitatorId || !startDate || !endDate || !conflict || !conflict.hasConflict) {
     return null;
   }
 
   return (
-    <div className="flex gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-300 sm:col-span-2">
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-      <p>
-        This facilitator has marked themselves unavailable for {conflict.blocks.length} period
-        {conflict.blocks.length === 1 ? "" : "s"} that overlap{conflict.blocks.length === 1 ? "s" : ""} these dates.
-        Confirm with them before assigning.
+    <div className="rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+      <div className="flex items-center gap-2 font-medium">
+        <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+        <span>Facilitator Availability Warning</span>
+      </div>
+      <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+        This facilitator has {conflict.count} conflict(s) or unavailability block(s) during the selected dates.
       </p>
     </div>
   );

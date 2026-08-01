@@ -384,6 +384,23 @@ export async function getFacilitatorUnavailability(
   }));
 }
 
+export type UnavailabilityConflict = {
+  hasConflict: boolean;
+  count: number;
+  conflictingExperiences?: Array<{
+    id: string;
+    title: string;
+    startDate: string;
+    endDate: string;
+  }>;
+  unavailabilityBlocks?: Array<{
+    id: string;
+    startDate: string;
+    endDate: string;
+    reason: string | null;
+  }>;
+};
+
 /**
  * Checks if assigned experiences fall into the given date range for a facilitator
  */

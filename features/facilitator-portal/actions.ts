@@ -12,7 +12,7 @@ import { getSessionContext } from "@/infrastructure/session/session-context";
 import { toActionError } from "@/shared/errors/action-error";
 
 import { updateFacilitatorProfileSchema, type UpdateFacilitatorProfileInput } from "./schema";
-import { checkAvailabilityConflict, getFacilitatorPortalSessionContext } from "./data";
+import { checkAvailabilityConflict, getFacilitatorPortalSessionContext, type UnavailabilityConflict } from "./data";
 
 function acceptUrlFor(token: string): string {
   return `${requireEnv("NEXT_PUBLIC_APP_URL").replace(/\/$/, "")}/facilitator-portal/accept?token=${token}`;
@@ -401,5 +401,45 @@ export async function facilitatorPortalSignOut() {
   const supabase = await createClient();
   await supabase.auth.signOut();
   redirect("/login");
+}
+
+export async function checkFacilitatorUnavailabilityForAssignment(
+  facilitatorId: string,
+  startDate: string,
+  endDate: string
+): Promise<UnavailabilityConflict> {
+  const supabase = await createClient();
+
+  if (!facilitatorId || !startDate || !endDate) {
+    return { hasConflict: false, count: 0 };
+  }
+
+  const reqStart = startDate.slice(0, 10);
+  const reqEnd = endDate.slice(0, 10);
+
+  const { data: blocks } = await supabase
+    .from("facilitator_unavailability")
+    .select("id, start_date, end_date, reason")
+    .eq("facilitator_id", facilitatorId);
+
+  const matchingBlocks = (blocks || []).filter((b) => {
+    const bStart = b.start_date.slice(0, 10);
+    const bEnd = b.end_date.slice(0, 10);
+    return bStart <= reqEnd && bEnd >= reqStart;
+  });
+
+  const conflict = await checkAvailabilityConflict(facilitatorId, startDate, endDate);
+
+  return {
+    hasConflict: matchingBlocks.length > 0 || conflict.hasConflict,
+    count: matchingBlocks.length + conflict.count,
+    conflictingExperiences: conflict.conflictingExperiences,
+    unavailabilityBlocks: matchingBlocks.map((b) => ({
+      id: b.id,
+      startDate: b.start_date,
+      endDate: b.end_date,
+      reason: b.reason,
+    })),
+  };
 }
 
