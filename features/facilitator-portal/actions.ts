@@ -403,6 +403,14 @@ export async function facilitatorPortalSignOut() {
   redirect("/login");
 }
 
+export async function checkUnavailabilityConflict(
+  facilitatorId: string,
+  startDate: string,
+  endDate: string
+) {
+  return checkAvailabilityConflict(facilitatorId, startDate, endDate);
+}
+
 export async function checkFacilitatorUnavailabilityForAssignment(
   facilitatorId: string,
   startDate: string,

@@ -193,3 +193,6 @@ export async function updateFacilitator(
   revalidatePath("/dashboard/facilitators");
   redirect(`/dashboard/facilitators/${facilitatorId}`);
 }
+
+export const updateFacilitatorProfile = updateFacilitator;
+

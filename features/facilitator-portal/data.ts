@@ -401,6 +401,8 @@ export type UnavailabilityConflict = {
   }>;
 };
 
+export type AvailabilityConflict = UnavailabilityConflict;
+
 /**
  * Checks if assigned experiences fall into the given date range for a facilitator
  */
