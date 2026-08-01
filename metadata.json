@@ -1,0 +1,6 @@
+{
+  "name": "CapabilityOS",
+  "description": "An operational and intelligence OS for high-impact capability building, workshops, and program management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

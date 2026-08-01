@@ -13,14 +13,16 @@ type SupabaseMiddlewareClient = ReturnType<typeof createServerClient>;
 async function resolveUserKind(
   supabase: SupabaseMiddlewareClient,
   userId: string
-): Promise<"dashboard" | "portal" | "none"> {
-  const [{ data: profile }, { data: portalUser }] = await Promise.all([
+): Promise<"dashboard" | "portal" | "facilitator" | "none"> {
+  const [{ data: profile }, { data: portalUser }, { data: facilitator }] = await Promise.all([
     supabase.from("profiles").select("id").eq("id", userId).maybeSingle(),
     supabase.from("client_portal_users").select("id").eq("auth_user_id", userId).eq("is_active", true).maybeSingle(),
+    supabase.from("facilitators").select("id").eq("auth_user_id", userId).eq("is_active", true).maybeSingle(),
   ]);
 
   if (profile) return "dashboard";
   if (portalUser) return "portal";
+  if (facilitator) return "facilitator";
   return "none";
 }
 
@@ -65,11 +67,7 @@ export async function updateSession(request: NextRequest) {
   const isDashboardRoute = pathname.startsWith("/dashboard");
   const isLoginRoute = pathname === "/login";
 
-  // /client-portal/accept, /forgot-password, and /reset-password are all
-  // reachable by definition before anyone has a normal session (accept and
-  // forgot-password need none at all; reset-password relies on Supabase's
-  // own short-lived recovery session, not the app's regular auth check) —
-  // excluded from every check below regardless of auth state.
+  // Public portal routes
   const isClientPortalPublicRoute =
     pathname === "/client-portal/accept" ||
     pathname === "/client-portal/forgot-password" ||
@@ -78,11 +76,15 @@ export async function updateSession(request: NextRequest) {
   const isClientPortalGuardedRoute =
     pathname.startsWith("/client-portal") && !isClientPortalPublicRoute && !isClientPortalLoginRoute;
 
-  if (isClientPortalPublicRoute) {
+  const isFacilitatorPortalPublicRoute = pathname === "/facilitator-portal/accept";
+  const isFacilitatorPortalGuardedRoute =
+    pathname.startsWith("/facilitator-portal") && !isFacilitatorPortalPublicRoute;
+
+  if (isClientPortalPublicRoute || isFacilitatorPortalPublicRoute) {
     return response;
   }
 
-  const userKind = isAuthenticated && userId && (isDashboardRoute || isLoginRoute || isClientPortalGuardedRoute || isClientPortalLoginRoute)
+  const userKind = isAuthenticated && userId && (isDashboardRoute || isLoginRoute || isClientPortalGuardedRoute || isClientPortalLoginRoute || isFacilitatorPortalGuardedRoute)
     ? await resolveUserKind(supabase, userId)
     : null;
 
@@ -97,6 +99,11 @@ export async function updateSession(request: NextRequest) {
       portalUrl.pathname = "/client-portal";
       return NextResponse.redirect(portalUrl);
     }
+    if (userKind === "facilitator") {
+      const facilitatorUrl = request.nextUrl.clone();
+      facilitatorUrl.pathname = "/facilitator-portal";
+      return NextResponse.redirect(facilitatorUrl);
+    }
     if (userKind !== "dashboard") {
       const loginUrl = request.nextUrl.clone();
       loginUrl.pathname = "/login";
@@ -104,10 +111,22 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  if (isLoginRoute && userKind === "dashboard") {
-    const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = "/dashboard";
-    return NextResponse.redirect(dashboardUrl);
+  if (isLoginRoute) {
+    if (userKind === "dashboard") {
+      const dashboardUrl = request.nextUrl.clone();
+      dashboardUrl.pathname = "/dashboard";
+      return NextResponse.redirect(dashboardUrl);
+    }
+    if (userKind === "portal") {
+      const portalUrl = request.nextUrl.clone();
+      portalUrl.pathname = "/client-portal";
+      return NextResponse.redirect(portalUrl);
+    }
+    if (userKind === "facilitator") {
+      const facilitatorUrl = request.nextUrl.clone();
+      facilitatorUrl.pathname = "/facilitator-portal";
+      return NextResponse.redirect(facilitatorUrl);
+    }
   }
 
   if (isClientPortalGuardedRoute) {
@@ -121,10 +140,38 @@ export async function updateSession(request: NextRequest) {
       dashboardUrl.pathname = "/dashboard";
       return NextResponse.redirect(dashboardUrl);
     }
+    if (userKind === "facilitator") {
+      const facilitatorUrl = request.nextUrl.clone();
+      facilitatorUrl.pathname = "/facilitator-portal";
+      return NextResponse.redirect(facilitatorUrl);
+    }
     if (userKind !== "portal") {
       const portalLoginUrl = request.nextUrl.clone();
       portalLoginUrl.pathname = "/client-portal/login";
       return NextResponse.redirect(portalLoginUrl);
+    }
+  }
+
+  if (isFacilitatorPortalGuardedRoute) {
+    if (!isAuthenticated) {
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = "/login";
+      return NextResponse.redirect(loginUrl);
+    }
+    if (userKind === "dashboard") {
+      const dashboardUrl = request.nextUrl.clone();
+      dashboardUrl.pathname = "/dashboard";
+      return NextResponse.redirect(dashboardUrl);
+    }
+    if (userKind === "portal") {
+      const portalUrl = request.nextUrl.clone();
+      portalUrl.pathname = "/client-portal";
+      return NextResponse.redirect(portalUrl);
+    }
+    if (userKind !== "facilitator") {
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = "/login";
+      return NextResponse.redirect(loginUrl);
     }
   }
 

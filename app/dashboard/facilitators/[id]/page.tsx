@@ -8,7 +8,16 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AvailabilityBadge } from "@/features/facilitators/components/availability-badge";
 import { DeliveryHistoryPanel } from "@/features/facilitators/components/delivery-history-panel";
-import { getFacilitatorById, getFacilitatorDeliveryHistory } from "@/features/facilitators/data";
+import {
+  getFacilitatorById,
+  getFacilitatorDeliveryHistory,
+} from "@/features/facilitators/data";
+import {
+  getFacilitatorPortalAccessStatus,
+  getFacilitatorUnavailability,
+} from "@/features/facilitator-portal/data";
+import { PortalAccessCard } from "@/features/facilitator-portal/components/portal-access-card";
+import { OperatorUnavailabilitySection } from "@/features/facilitator-portal/components/operator-unavailability-section";
 
 const SIX_MONTHS_DAYS = 182;
 
@@ -60,7 +69,12 @@ export default async function FacilitatorDetailPage({ params }: Props) {
     notFound();
   }
 
-  const history = await getFacilitatorDeliveryHistory(facilitator.email);
+  const [history, accessStatus, unavailabilityBlocks] = await Promise.all([
+    getFacilitatorDeliveryHistory(facilitator.email),
+    getFacilitatorPortalAccessStatus(facilitator.id),
+    getFacilitatorUnavailability(facilitator.id),
+  ]);
+
   const passport = passportStatus(facilitator.passportExpiry);
 
   return (
@@ -72,6 +86,8 @@ export default async function FacilitatorDetailPage({ params }: Props) {
         <ArrowLeft className="size-4" />
         Back to facilitators
       </Link>
+
+      <PortalAccessCard facilitatorId={facilitator.id} accessStatus={accessStatus} />
 
       <Card className="bg-surface-elevated">
         <CardContent className="flex flex-wrap items-start justify-between gap-6">
@@ -253,6 +269,11 @@ export default async function FacilitatorDetailPage({ params }: Props) {
           )}
         </CardContent>
       </Card>
+
+      <OperatorUnavailabilitySection
+        facilitatorId={facilitator.id}
+        unavailabilityBlocks={unavailabilityBlocks}
+      />
 
       <DeliveryHistoryPanel history={history} />
     </div>

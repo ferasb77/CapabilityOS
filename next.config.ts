@@ -3,7 +3,6 @@ import type { NextConfig } from "next";
 const securityHeaders = [
   { key: "X-DNS-Prefetch-Control", value: "on" },
   { key: "X-XSS-Protection", value: "1; mode=block" },
-  { key: "X-Frame-Options", value: "SAMEORIGIN" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
@@ -16,7 +15,7 @@ const securityHeaders = [
       "font-src 'self' data: https://fonts.gstatic.com",
       "img-src 'self' data: blob: https:",
       "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.anthropic.com https://mcp.resend.com https://api.resend.com",
-      "frame-ancestors 'none'",
+      "frame-ancestors *",
       "base-uri 'self'",
       "form-action 'self'",
     ].join("; "),
@@ -24,6 +23,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   async headers() {
     return [
       {
