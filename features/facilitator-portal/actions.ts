@@ -12,7 +12,8 @@ import { getSessionContext } from "@/infrastructure/session/session-context";
 import { toActionError } from "@/shared/errors/action-error";
 
 import { updateFacilitatorProfileSchema, type UpdateFacilitatorProfileInput } from "./schema";
-import { checkAvailabilityConflict, getFacilitatorPortalSessionContext, type UnavailabilityConflict } from "./data";
+// We alias the import to checkDataConflict to avoid naming collisions with the local function
+import { checkUnavailabilityConflict as checkDataConflict, getFacilitatorPortalSessionContext, type UnavailabilityConflict } from "./data";
 
 function acceptUrlFor(token: string): string {
   return `${requireEnv("NEXT_PUBLIC_APP_URL").replace(/\/$/, "")}/facilitator-portal/accept?token=${token}`;
@@ -357,7 +358,7 @@ export async function addUnavailability(
   }
 
   // Check conflicts
-  const conflict = await checkAvailabilityConflict(facilitatorId, startDate, endDate);
+  const conflict = await checkDataConflict(facilitatorId, startDate, endDate);
   let warningMessage: string | undefined;
 
   if (conflict.hasConflict) {
@@ -408,7 +409,7 @@ export async function checkUnavailabilityConflict(
   startDate: string,
   endDate: string
 ) {
-  return checkAvailabilityConflict(facilitatorId, startDate, endDate);
+  return checkDataConflict(facilitatorId, startDate, endDate);
 }
 
 export async function checkFacilitatorUnavailabilityForAssignment(
@@ -419,7 +420,7 @@ export async function checkFacilitatorUnavailabilityForAssignment(
   const supabase = await createClient();
 
   if (!facilitatorId || !startDate || !endDate) {
-    return { hasConflict: false, count: 0 };
+    return { hasConflict: false, count: 0, conflictingExperiences: [], experiences: [] };
   }
 
   const reqStart = startDate.slice(0, 10);
@@ -436,12 +437,13 @@ export async function checkFacilitatorUnavailabilityForAssignment(
     return bStart <= reqEnd && bEnd >= reqStart;
   });
 
-  const conflict = await checkAvailabilityConflict(facilitatorId, startDate, endDate);
+  const conflict = await checkDataConflict(facilitatorId, startDate, endDate);
 
   return {
     hasConflict: matchingBlocks.length > 0 || conflict.hasConflict,
     count: matchingBlocks.length + conflict.count,
-    conflictingExperiences: conflict.conflictingExperiences,
+    conflictingExperiences: conflict.conflictingExperiences || [],
+    experiences: conflict.conflictingExperiences || [],
     unavailabilityBlocks: matchingBlocks.map((b) => ({
       id: b.id,
       startDate: b.start_date,
@@ -450,4 +452,3 @@ export async function checkFacilitatorUnavailabilityForAssignment(
     })),
   };
 }
-
