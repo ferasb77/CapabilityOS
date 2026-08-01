@@ -384,65 +384,52 @@ export async function getFacilitatorUnavailability(
   }));
 }
 
-export type UnavailabilityConflict = {
-  hasConflict: boolean;
-  count: number;
-  conflictingExperiences?: Array<{
-    id: string;
-    title: string;
-    startDate: string;
-    endDate: string;
-  }>;
-  unavailabilityBlocks?: Array<{
-    id: string;
-    startDate: string;
-    endDate: string;
-    reason: string | null;
-  }>;
-};
-
-export type AvailabilityConflict = UnavailabilityConflict;
-
-/**
- * Checks if assigned experiences fall into the given date range for a facilitator
- */
-export async function checkAvailabilityConflict(
+export async function checkUnavailabilityConflict(
   facilitatorId: string,
   startDate: string,
   endDate: string
 ) {
+  return checkAvailabilityConflict(facilitatorId, startDate, endDate);
+}
+
+export async function checkFacilitatorUnavailabilityForAssignment(
+  facilitatorId: string,
+  startDate: string,
+  endDate: string
+): Promise<UnavailabilityConflict> {
   const supabase = await createClient();
 
-  // Get facilitator email first
-  const { data: facilitator } = await supabase
-    .from("facilitators")
-    .select("email")
-    .eq("id", facilitatorId)
-    .single();
-
-  if (!facilitator) {
-    return { hasConflict: false, count: 0, conflictingExperiences: [] };
+  if (!facilitatorId || !startDate || !endDate) {
+    return { hasConflict: false, count: 0, conflictingExperiences: [], experiences: [] };
   }
-
-  const experiences = await getFacilitatorAssignedExperiences(facilitator.email);
 
   const reqStart = startDate.slice(0, 10);
   const reqEnd = endDate.slice(0, 10);
 
-  const conflicts = experiences.filter((exp) => {
-    const expStart = exp.startDate.slice(0, 10);
-    const expEnd = exp.endDate.slice(0, 10);
-    return expStart <= reqEnd && expEnd >= reqStart;
+  const { data: blocks } = await supabase
+    .from("facilitator_unavailability")
+    .select("id, start_date, end_date, reason")
+    .eq("facilitator_id", facilitatorId);
+
+  const matchingBlocks = (blocks || []).filter((b) => {
+    const bStart = b.start_date.slice(0, 10);
+    const bEnd = b.end_date.slice(0, 10);
+    return bStart <= reqEnd && bEnd >= reqStart;
   });
 
+  const conflict = await checkAvailabilityConflict(facilitatorId, startDate, endDate);
+  const conflictingExperiences = conflict.conflictingExperiences || [];
+
   return {
-    hasConflict: conflicts.length > 0,
-    count: conflicts.length,
-    conflictingExperiences: conflicts.map((c) => ({
-      id: c.id,
-      title: c.title,
-      startDate: c.startDate,
-      endDate: c.endDate,
+    hasConflict: matchingBlocks.length > 0 || conflict.hasConflict,
+    count: matchingBlocks.length + conflict.count,
+    conflictingExperiences,
+    experiences: conflictingExperiences,
+    unavailabilityBlocks: matchingBlocks.map((b) => ({
+      id: b.id,
+      startDate: b.start_date,
+      endDate: b.end_date,
+      reason: b.reason,
     })),
   };
 }
