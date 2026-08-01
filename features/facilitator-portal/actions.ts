@@ -396,3 +396,10 @@ export async function removeUnavailability(unavailabilityId: string): Promise<In
   revalidatePath("/facilitator-portal/availability");
   return { success: true };
 }
+
+export async function facilitatorPortalSignOut() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+  redirect("/login");
+}
+

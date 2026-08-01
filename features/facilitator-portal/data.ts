@@ -465,3 +465,71 @@ export async function getFacilitatorProfileForEdit(facilitatorId: string) {
     visaCountries: data.visa_countries ?? [],
   };
 }
+
+/**
+ * Get detailed experience record by ID for facilitator views
+ */
+export async function getFacilitatorExperienceDetail(
+  experienceId: string,
+  facilitatorEmail?: string
+) {
+  const supabase = await createClient();
+
+  let query = supabase
+    .from("experiences")
+    .select(
+      `
+      id,
+      slug,
+      title,
+      title_ar,
+      experience_type,
+      status,
+      start_date,
+      end_date,
+      venue,
+      city,
+      country,
+      capacity,
+      facilitator_email,
+      facilitator_materials_slug,
+      clients ( name ),
+      engagements ( title )
+    `
+    )
+    .eq("id", experienceId)
+    .is("deleted_at", null);
+
+  if (facilitatorEmail) {
+    query = query.ilike("facilitator_email", facilitatorEmail);
+  }
+
+  const { data: row, error } = await query.maybeSingle();
+
+  if (error || !row) {
+    return null;
+  }
+
+  const clientObj = Array.isArray(row.clients) ? row.clients[0] : row.clients;
+  const engagementObj = Array.isArray(row.engagements) ? row.engagements[0] : row.engagements;
+
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    titleAr: row.title_ar,
+    experienceType: row.experience_type ?? "workshop",
+    status: row.status ?? "active",
+    startDate: row.start_date,
+    endDate: row.end_date,
+    venue: row.venue,
+    city: row.city,
+    country: row.country,
+    capacity: row.capacity ?? 0,
+    clientName: clientObj?.name ?? null,
+    engagementTitle: engagementObj?.title ?? null,
+    facilitatorEmail: row.facilitator_email,
+    facilitatorMaterialsSlug: row.facilitator_materials_slug ?? null,
+  };
+}
+
