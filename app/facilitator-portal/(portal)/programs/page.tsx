@@ -7,14 +7,10 @@ import { ProgramsView } from "@/features/facilitator-portal/components/programs-
 
 export default async function FacilitatorProgramsPage() {
   const facilitator = await getFacilitatorPortalSessionContext();
-  const experiences = await getFacilitatorAssignedExperiences(facilitator.email);
-  const stats = await getFacilitatorPortalStats(facilitator.email);
+  const [experiences, stats] = await Promise.all([
+    getFacilitatorAssignedExperiences(facilitator.email),
+    getFacilitatorPortalStats(facilitator.email),
+  ]);
 
-  return (
-    <ProgramsView
-      experiences={experiences}
-      stats={stats}
-      facilitatorEmail={facilitator.email}
-    />
-  );
+  return <ProgramsView facilitatorId={facilitator.id} experiences={experiences} stats={stats} />;
 }

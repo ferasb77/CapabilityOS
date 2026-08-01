@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { createExperience, type CreateExperienceResult } from "../actions";
 import { COUNTRIES, CREATE_STATUS_OPTIONS, EXPERIENCE_TYPE_LABELS, EXPERIENCE_TYPES } from "../schema";
+import { FacilitatorConflictWarning } from "./facilitator-conflict-warning";
 
 const initialState: CreateExperienceResult = { success: false, error: "", values: {} };
 
@@ -151,6 +152,13 @@ export function ExperienceForm({
     () => engagements.filter((engagement) => !selectedClientId || engagement.clientId === selectedClientId),
     [engagements, selectedClientId]
   );
+
+  // Controlled for the same reason — feeds the live facilitator
+  // unavailability-conflict warning below, which needs to react as either
+  // the facilitator or the dates change.
+  const [selectedFacilitatorId, setSelectedFacilitatorId] = useState(field("facilitatorId") || "");
+  const [startDateValue, setStartDateValue] = useState(field("startDate") || "");
+  const [endDateValue, setEndDateValue] = useState(field("endDate") || "");
 
   const showClientSection = clients.length > 0 || engagements.length > 0;
 
@@ -326,6 +334,7 @@ export function ExperienceForm({
             type="datetime-local"
             required
             defaultValue={field("startDate")}
+            onChange={(event) => setStartDateValue(event.target.value)}
           />
           <FieldError messages={fieldErrors?.startDate} />
         </div>
@@ -340,6 +349,7 @@ export function ExperienceForm({
             type="datetime-local"
             required
             defaultValue={field("endDate")}
+            onChange={(event) => setEndDateValue(event.target.value)}
           />
           <FieldError messages={fieldErrors?.endDate} />
         </div>
@@ -407,6 +417,7 @@ export function ExperienceForm({
           <Select
             name="facilitatorId"
             defaultValue={field("facilitatorId") || undefined}
+            onValueChange={(next) => setSelectedFacilitatorId(next ?? "")}
             items={facilitators.map((facilitator) => ({
               value: facilitator.id,
               label: facilitator.primaryExpertise
@@ -428,6 +439,14 @@ export function ExperienceForm({
             </SelectContent>
           </Select>
         </div>
+
+        {selectedFacilitatorId && startDateValue && endDateValue && (
+          <FacilitatorConflictWarning
+            facilitatorId={selectedFacilitatorId}
+            startDate={startDateValue}
+            endDate={endDateValue}
+          />
+        )}
 
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="facilitatorNotes">Notes for facilitator</Label>

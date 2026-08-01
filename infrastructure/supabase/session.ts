@@ -17,7 +17,7 @@ async function resolveUserKind(
   const [{ data: profile }, { data: portalUser }, { data: facilitator }] = await Promise.all([
     supabase.from("profiles").select("id").eq("id", userId).maybeSingle(),
     supabase.from("client_portal_users").select("id").eq("auth_user_id", userId).eq("is_active", true).maybeSingle(),
-    supabase.from("facilitators").select("id").eq("auth_user_id", userId).eq("is_active", true).maybeSingle(),
+    supabase.from("facilitators").select("id").eq("auth_user_id", userId).eq("portal_access_active", true).maybeSingle(),
   ]);
 
   if (profile) return "dashboard";

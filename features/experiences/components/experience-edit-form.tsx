@@ -35,6 +35,7 @@ import {
   EXPERIENCE_TYPES,
 } from "../schema";
 import { DeleteExperienceDialog } from "./delete-experience-dialog";
+import { FacilitatorConflictWarning } from "./facilitator-conflict-warning";
 
 const initialState: UpdateExperienceResult = { success: false, error: "", values: {} };
 
@@ -189,6 +190,15 @@ export function ExperienceEditForm({
     () => engagements.filter((engagement) => !selectedClientId || engagement.clientId === selectedClientId),
     [engagements, selectedClientId]
   );
+
+  // Controlled for the same reason — feeds the live facilitator
+  // unavailability-conflict warning below, which needs to react as either
+  // the facilitator or the dates change.
+  const [selectedFacilitatorId, setSelectedFacilitatorId] = useState(
+    field("facilitatorId", currentFacilitatorId ?? "")
+  );
+  const [startDateValue, setStartDateValue] = useState(field("startDate", toDateTimeLocalValue(experience.startDate)));
+  const [endDateValue, setEndDateValue] = useState(field("endDate", toDateTimeLocalValue(experience.endDate)));
 
   const [dailyCheckinEnabled, setDailyCheckinEnabled] = useState(
     field("dailyCheckinEnabled", experience.dailyCheckinEnabled ? "true" : "false") === "true"
@@ -388,6 +398,7 @@ export function ExperienceEditForm({
             required
             disabled={readOnly}
             defaultValue={field("startDate", toDateTimeLocalValue(experience.startDate))}
+            onChange={(event) => setStartDateValue(event.target.value)}
           />
           <FieldError messages={fieldErrors?.startDate} />
         </div>
@@ -403,6 +414,7 @@ export function ExperienceEditForm({
             required
             disabled={readOnly}
             defaultValue={field("endDate", toDateTimeLocalValue(experience.endDate))}
+            onChange={(event) => setEndDateValue(event.target.value)}
           />
           <FieldError messages={fieldErrors?.endDate} />
         </div>
@@ -484,6 +496,7 @@ export function ExperienceEditForm({
           <Select
             name="facilitatorId"
             defaultValue={field("facilitatorId", currentFacilitatorId ?? "") || undefined}
+            onValueChange={(next) => setSelectedFacilitatorId(next ?? "")}
             disabled={readOnly}
             items={facilitators.map((facilitator) => ({
               value: facilitator.id,
@@ -506,6 +519,14 @@ export function ExperienceEditForm({
             </SelectContent>
           </Select>
         </div>
+
+        {selectedFacilitatorId && startDateValue && endDateValue && (
+          <FacilitatorConflictWarning
+            facilitatorId={selectedFacilitatorId}
+            startDate={startDateValue}
+            endDate={endDateValue}
+          />
+        )}
 
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="facilitatorNotes">Notes for facilitator</Label>

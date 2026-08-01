@@ -3,469 +3,70 @@ import { cache } from "react";
 
 import { createClient } from "@/infrastructure/supabase/server";
 import { createServiceRoleClient } from "@/infrastructure/supabase/service-role";
+import type { ExperienceStatus } from "@/infrastructure/repositories/dashboard";
 
-export type FacilitatorPortalSessionContext = {
+// ---------------------------------------------------------------------------
+// Invitation lookup — /facilitator-portal/accept has no session yet, so this
+// reads through the service-role client, mirroring
+// features/client-portal/data.ts's getInvitationByToken.
+// ---------------------------------------------------------------------------
+
+export type PendingFacilitatorInvitation = { fullName: string; alreadyAccepted: boolean };
+
+export async function getFacilitatorInvitationByToken(token: string): Promise<PendingFacilitatorInvitation | null> {
+  const supabase = createServiceRoleClient();
+
+  const { data, error } = await supabase
+    .from("facilitators")
+    .select("first_name, last_name, invitation_accepted_at, portal_access_active")
+    .eq("invitation_token", token)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data || !data.portal_access_active) {
+    return null;
+  }
+
+  return {
+    fullName: `${data.first_name} ${data.last_name}`,
+    alreadyAccepted: Boolean(data.invitation_accepted_at),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Portal identity
+// ---------------------------------------------------------------------------
+
+export type FacilitatorPortalUser = {
   id: string;
   firstName: string;
   lastName: string;
   fullName: string;
   email: string;
   title: string | null;
-  organization: string | null;
   photoUrl: string | null;
-  phone: string | null;
-  isActive: boolean;
 };
 
-export type AssignedExperience = {
-  id: string;
-  slug: string;
-  title: string;
-  titleAr: string | null;
-  experienceType: string;
-  status: string;
-  startDate: string;
-  endDate: string;
-  venue: string | null;
-  city: string | null;
-  country: string | null;
-  capacity: number;
-  clientName: string | null;
-  engagementTitle: string | null;
-  participantCount: number;
-  checkInCount: number;
-  checkInRate: number; // percentage 0 - 100
-  satisfactionScore: number | null;
-  facilitatorMaterialsSlug?: string | null;
-};
-
-export type UnavailabilityBlock = {
-  id: string;
-  facilitatorId: string;
-  workspaceId: string;
-  startDate: string; // YYYY-MM-DD
-  endDate: string;   // YYYY-MM-DD
-  reason: string | null;
-  createdAt: string;
-};
-
-export type FacilitatorPortalStats = {
-  totalAssigned: number;
-  upcoming30Days: number;
-  completedThisYear: number;
-  averageSatisfaction: number | null;
-};
-
-export type FacilitatorPortalAccessStatus = {
-  status: "not_invited" | "invited" | "active" | "inactive";
-  invitedAt: string | null;
-  invitationAcceptedAt: string | null;
-  isActive: boolean;
-  email: string;
-};
-
-// ADDED: Missing type definition required by checkFacilitatorUnavailabilityForAssignment
-export type UnavailabilityConflict = {
-  hasConflict: boolean;
-  count: number;
-  conflictingExperiences: any[];
-  experiences: any[];
-  unavailabilityBlocks?: any[];
-};
-
-/**
- * Resolves the authenticated facilitator's session context.
- * Redirects to /login if no valid session or not a facilitator.
- */
-export const getFacilitatorPortalSessionContext = cache(
-  async (): Promise<FacilitatorPortalSessionContext> => {
-    const supabase = await createClient();
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      redirect("/login");
-    }
-
-    const { data: facilitator, error } = await supabase
-      .from("facilitators")
-      .select("id, first_name, last_name, email, title, organization, photo_url, phone, is_active")
-      .eq("auth_user_id", user.id)
-      .maybeSingle();
-
-    if (error || !facilitator) {
-      redirect("/login?error=no_facilitator_profile");
-    }
-
-    if (!facilitator.is_active) {
-      redirect("/login?error=account_deactivated");
-    }
-
-    return {
-      id: facilitator.id,
-      firstName: facilitator.first_name,
-      lastName: facilitator.last_name,
-      fullName: `${facilitator.first_name} ${facilitator.last_name}`,
-      email: facilitator.email,
-      title: facilitator.title,
-      organization: facilitator.organization,
-      photoUrl: facilitator.photo_url,
-      phone: facilitator.phone,
-      isActive: facilitator.is_active,
-    };
-  }
-);
-
-/**
- * Returns facilitator record by auth_user_id
- */
-export async function getFacilitatorPortalUser(authUserId: string) {
+/** A deactivated portal user (portal_access_active = false) resolves to null
+ * — the same "no access" outcome as never having been invited, so revoking
+ * portal access locks a facilitator out the moment the flag flips. */
+export async function getFacilitatorPortalUser(authUserId: string): Promise<FacilitatorPortalUser | null> {
   const supabase = await createClient();
 
-  const { data: facilitator } = await supabase
+  const { data, error } = await supabase
     .from("facilitators")
-    .select("id, first_name, last_name, email, title, organization, photo_url, phone, is_active")
+    .select("id, first_name, last_name, email, title, photo_url, portal_access_active")
     .eq("auth_user_id", authUserId)
     .maybeSingle();
 
-  if (!facilitator) return null;
-
-  return {
-    id: facilitator.id,
-    firstName: facilitator.first_name,
-    lastName: facilitator.last_name,
-    fullName: `${facilitator.first_name} ${facilitator.last_name}`,
-    email: facilitator.email,
-    title: facilitator.title,
-    organization: facilitator.organization,
-    photoUrl: facilitator.photo_url,
-    phone: facilitator.phone,
-    isActive: facilitator.is_active,
-  };
-}
-
-/**
- * Invitation lookup by token for /facilitator-portal/accept
- */
-export async function getFacilitatorInvitationByToken(token: string) {
-  const serviceClient = createServiceRoleClient();
-
-  const { data, error } = await serviceClient
-    .from("facilitators")
-    .select("id, first_name, last_name, email, invitation_accepted_at, is_active")
-    .eq("invitation_token", token)
-    .maybeSingle();
-
-  if (error || !data || !data.is_active) {
-    return null;
+  if (error) {
+    throw new Error(error.message);
   }
 
-  return {
-    id: data.id,
-    fullName: `${data.first_name} ${data.last_name}`,
-    email: data.email,
-    alreadyAccepted: Boolean(data.invitation_accepted_at),
-  };
-}
-
-/**
- * Get portal access status for operator detail view
- */
-export async function getFacilitatorPortalAccessStatus(
-  facilitatorId: string
-): Promise<FacilitatorPortalAccessStatus | null> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("facilitators")
-    .select("invited_at, invitation_accepted_at, is_active, auth_user_id, email")
-    .eq("id", facilitatorId)
-    .maybeSingle();
-
-  if (error || !data) {
-    return null;
-  }
-
-  let status: "not_invited" | "invited" | "active" | "inactive" = "not_invited";
-
-  if (!data.is_active) {
-    status = "inactive";
-  } else if (data.invitation_accepted_at && data.auth_user_id) {
-    status = "active";
-  } else if (data.invited_at) {
-    status = "invited";
-  }
-
-  return {
-    status,
-    invitedAt: data.invited_at,
-    invitationAcceptedAt: data.invitation_accepted_at,
-    isActive: data.is_active,
-    email: data.email,
-  };
-}
-
-/**
- * Fetches assigned experiences for a facilitator by matching email.
- */
-export async function getFacilitatorAssignedExperiences(
-  facilitatorEmail: string
-): Promise<AssignedExperience[]> {
-  const supabase = await createClient();
-
-  const { data: expRows, error } = await supabase
-    .from("experiences")
-    .select(
-      `
-      id,
-      slug,
-      title,
-      title_ar,
-      experience_type,
-      status,
-      start_date,
-      end_date,
-      venue,
-      city,
-      country,
-      capacity,
-      clients ( name ),
-      engagements ( title )
-    `
-    )
-    .ilike("facilitator_email", facilitatorEmail)
-    .is("deleted_at", null)
-    .order("start_date", { ascending: true });
-
-  if (error || !expRows) {
-    return [];
-  }
-
-  if (expRows.length === 0) {
-    return [];
-  }
-
-  const expIds = expRows.map((e) => e.id);
-
-  // Get participant counts & attendance
-  const [{ data: participantCounts }, { data: attendanceRows }, { data: surveyRows }] = await Promise.all([
-    supabase
-      .from("participants")
-      .select("experience_id")
-      .in("experience_id", expIds)
-      .is("deleted_at", null),
-    supabase
-      .from("daily_attendance")
-      .select("experience_id, checked_in")
-      .in("experience_id", expIds),
-    supabase
-      .from("survey_responses")
-      .select("experience_id, satisfaction_rating")
-      .in("experience_id", expIds),
-  ]);
-
-  const pCountMap = new Map<string, number>();
-  (participantCounts ?? []).forEach((p) => {
-    pCountMap.set(p.experience_id, (pCountMap.get(p.experience_id) ?? 0) + 1);
-  });
-
-  const checkInMap = new Map<string, number>();
-  (attendanceRows ?? []).forEach((a) => {
-    if (a.checked_in) {
-      checkInMap.set(a.experience_id, (checkInMap.get(a.experience_id) ?? 0) + 1);
-    }
-  });
-
-  const ratingMap = new Map<string, number[]>();
-  (surveyRows ?? []).forEach((s) => {
-    if (s.satisfaction_rating != null) {
-      const arr = ratingMap.get(s.experience_id) ?? [];
-      arr.push(Number(s.satisfaction_rating));
-      ratingMap.set(s.experience_id, arr);
-    }
-  });
-
-  return expRows.map((row) => {
-    const clientObj = Array.isArray(row.clients) ? row.clients[0] : row.clients;
-    const engagementObj = Array.isArray(row.engagements) ? row.engagements[0] : row.engagements;
-
-    const pCount = pCountMap.get(row.id) ?? 0;
-    const cCount = checkInMap.get(row.id) ?? 0;
-    const checkInRate = pCount > 0 ? Math.round((cCount / pCount) * 100) : 0;
-
-    const ratings = ratingMap.get(row.id) ?? [];
-    const avgSat = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : null;
-
-    return {
-      id: row.id,
-      slug: row.slug,
-      title: row.title,
-      titleAr: row.title_ar,
-      experienceType: row.experience_type ?? "workshop",
-      status: row.status ?? "active",
-      startDate: row.start_date,
-      endDate: row.end_date,
-      venue: row.venue,
-      city: row.city,
-      country: row.country,
-      capacity: row.capacity ?? 0,
-      clientName: clientObj?.name ?? null,
-      engagementTitle: engagementObj?.title ?? null,
-      participantCount: pCount,
-      checkInCount: cCount,
-      checkInRate,
-      satisfactionScore: avgSat,
-    };
-  });
-}
-
-/**
- * Get stats summary for facilitator portal
- */
-export async function getFacilitatorPortalStats(
-  facilitatorEmail: string
-): Promise<FacilitatorPortalStats> {
-  const experiences = await getFacilitatorAssignedExperiences(facilitatorEmail);
-
-  const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
-  const in30Days = new Date(now.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
-  const currentYear = now.getFullYear();
-
-  const totalAssigned = experiences.length;
-
-  const upcoming30Days = experiences.filter((e) => {
-    const startDateStr = e.startDate.slice(0, 10);
-    return startDateStr >= todayStr && startDateStr <= in30Days;
-  }).length;
-
-  const completedThisYear = experiences.filter((e) => {
-    const isCompleted = e.status === "completed" || e.endDate.slice(0, 10) < todayStr;
-    const startYear = new Date(e.startDate).getFullYear();
-    return isCompleted && startYear === currentYear;
-  }).length;
-
-  const satScores = experiences
-    .map((e) => e.satisfactionScore)
-    .filter((s): s is number => s !== null);
-
-  const averageSatisfaction =
-    satScores.length > 0
-      ? Number((satScores.reduce((a, b) => a + b, 0) / satScores.length).toFixed(1))
-      : null;
-
-  return {
-    totalAssigned,
-    upcoming30Days,
-    completedThisYear,
-    averageSatisfaction,
-  };
-}
-
-/**
- * Fetches facilitator unavailability blocks
- */
-export async function getFacilitatorUnavailability(
-  facilitatorId: string
-): Promise<UnavailabilityBlock[]> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("facilitator_unavailability")
-    .select("id, facilitator_id, workspace_id, start_date, end_date, reason, created_at")
-    .eq("facilitator_id", facilitatorId)
-    .order("start_date", { ascending: true });
-
-  if (error || !data) {
-    return [];
-  }
-
-  return data.map((row) => ({
-    id: row.id,
-    facilitatorId: row.facilitator_id,
-    workspaceId: row.workspace_id,
-    startDate: row.start_date,
-    endDate: row.end_date,
-    reason: row.reason,
-    createdAt: row.created_at,
-  }));
-}
-
-// ADDED: Fallback helper function to prevent undefined reference crashes.
-// Replace this with an import if this function exists elsewhere in your codebase.
-async function checkAvailabilityConflict(
-  facilitatorId: string,
-  startDate: string,
-  endDate: string
-): Promise<{ hasConflict: boolean; count: number; conflictingExperiences: any[] }> {
-  return { hasConflict: false, count: 0, conflictingExperiences: [] };
-}
-
-export async function checkUnavailabilityConflict(
-  facilitatorId: string,
-  startDate: string,
-  endDate: string
-) {
-  return checkAvailabilityConflict(facilitatorId, startDate, endDate);
-}
-
-export async function checkFacilitatorUnavailabilityForAssignment(
-  facilitatorId: string,
-  startDate: string,
-  endDate: string
-): Promise<UnavailabilityConflict> {
-  const supabase = await createClient();
-
-  if (!facilitatorId || !startDate || !endDate) {
-    return { hasConflict: false, count: 0, conflictingExperiences: [], experiences: [] };
-  }
-
-  const reqStart = startDate.slice(0, 10);
-  const reqEnd = endDate.slice(0, 10);
-
-  const { data: blocks } = await supabase
-    .from("facilitator_unavailability")
-    .select("id, start_date, end_date, reason")
-    .eq("facilitator_id", facilitatorId);
-
-  const matchingBlocks = (blocks || []).filter((b) => {
-    const bStart = b.start_date.slice(0, 10);
-    const bEnd = b.end_date.slice(0, 10);
-    return bStart <= reqEnd && bEnd >= reqStart;
-  });
-
-  const conflict = await checkAvailabilityConflict(facilitatorId, startDate, endDate);
-  const conflictingExperiences = conflict.conflictingExperiences || [];
-
-  return {
-    hasConflict: matchingBlocks.length > 0 || conflict.hasConflict,
-    count: matchingBlocks.length + conflict.count,
-    conflictingExperiences,
-    experiences: conflictingExperiences,
-    unavailabilityBlocks: matchingBlocks.map((b) => ({
-      id: b.id,
-      startDate: b.start_date,
-      endDate: b.end_date,
-      reason: b.reason,
-    })),
-  };
-}
-
-/**
- * Get full facilitator profile details for self-service editing
- */
-export async function getFacilitatorProfileForEdit(facilitatorId: string) {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("facilitators")
-    .select("*")
-    .eq("id", facilitatorId)
-    .single();
-
-  if (error || !data) {
+  if (!data || !data.portal_access_active) {
     return null;
   }
 
@@ -473,87 +74,480 @@ export async function getFacilitatorProfileForEdit(facilitatorId: string) {
     id: data.id,
     firstName: data.first_name,
     lastName: data.last_name,
+    fullName: `${data.first_name} ${data.last_name}`,
     email: data.email,
-    phone: data.phone,
-    photoUrl: data.photo_url,
-    bio: data.bio,
     title: data.title,
-    organization: data.organization,
-    yearsExperience: data.years_experience,
-    expertiseAreas: data.expertise_areas ?? [],
-    certifications: data.certifications ?? [],
-    languages: data.languages ?? [],
-    regions: data.regions ?? [],
-    willingToTravel: data.willing_to_travel ?? true,
-    travelNotes: data.travel_notes,
-    passportExpiry: data.passport_expiry,
-    visaCountries: data.visa_countries ?? [],
+    photoUrl: data.photo_url,
   };
 }
 
 /**
- * Get detailed experience record by ID for facilitator views
+ * Every /facilitator-portal page needs this — resolves the signed-in
+ * Supabase Auth user against `facilitators` and redirects to the shared
+ * /login page if there's no session or no matching (portal-active)
+ * facilitator. Mirrors getClientPortalSessionContext
+ * (features/client-portal/data.ts), except facilitators sign in through the
+ * same /login page operators use (CLAUDE.md brief), not a portal-specific
+ * login route.
  */
-export async function getFacilitatorExperienceDetail(
-  experienceId: string,
-  facilitatorEmail?: string
-) {
+export const getFacilitatorPortalSessionContext = cache(async (): Promise<FacilitatorPortalUser> => {
   const supabase = await createClient();
 
-  let query = supabase
-    .from("experiences")
-    .select(
-      `
-      id,
-      slug,
-      title,
-      title_ar,
-      experience_type,
-      status,
-      start_date,
-      end_date,
-      venue,
-      city,
-      country,
-      capacity,
-      facilitator_email,
-      facilitator_materials_slug,
-      clients ( name ),
-      engagements ( title )
-    `
-    )
-    .eq("id", experienceId)
-    .is("deleted_at", null);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (facilitatorEmail) {
-    query = query.ilike("facilitator_email", facilitatorEmail);
+  if (!user) {
+    redirect("/login");
   }
 
-  const { data: row, error } = await query.maybeSingle();
+  const portalUser = await getFacilitatorPortalUser(user.id);
 
-  if (error || !row) {
+  if (!portalUser) {
+    redirect("/login");
+  }
+
+  return portalUser;
+});
+
+// ---------------------------------------------------------------------------
+// Portal access status — read by the operator-facing "Portal Access"
+// section on /dashboard/facilitators/[id] (CLAUDE.md: "Status: Not Invited
+// / Invited (pending) / Active / Inactive").
+// ---------------------------------------------------------------------------
+
+export type FacilitatorPortalAccessStatus = "not_invited" | "invited" | "active" | "inactive";
+
+export type FacilitatorPortalAccess = {
+  status: FacilitatorPortalAccessStatus;
+  invitedAt: string | null;
+  invitationAcceptedAt: string | null;
+};
+
+export async function getFacilitatorPortalAccessStatus(facilitatorId: string): Promise<FacilitatorPortalAccess> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("facilitators")
+    .select("invited_at, invitation_accepted_at, portal_access_active")
+    .eq("id", facilitatorId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data || !data.invited_at) {
+    return { status: "not_invited", invitedAt: null, invitationAcceptedAt: data?.invitation_accepted_at ?? null };
+  }
+
+  let status: FacilitatorPortalAccessStatus;
+  if (!data.portal_access_active) {
+    status = "inactive";
+  } else if (!data.invitation_accepted_at) {
+    status = "invited";
+  } else {
+    status = "active";
+  }
+
+  return { status, invitedAt: data.invited_at, invitationAcceptedAt: data.invitation_accepted_at };
+}
+
+// ---------------------------------------------------------------------------
+// Assigned experiences — scoped by matching facilitator.email to
+// experiences.facilitator_email, same free-text match
+// getFacilitatorDeliveryHistory (features/facilitators/data.ts) uses for the
+// operator-facing delivery history panel.
+// ---------------------------------------------------------------------------
+
+export type FacilitatorAssignedExperience = {
+  id: string;
+  slug: string;
+  title: string;
+  status: ExperienceStatus;
+  /** Date-only (YYYY-MM-DD), sliced from experiences.start_date (timestamptz)
+   * — every consumer here (calendar keying, tone, stats) compares these as
+   * plain dates, same as facilitator_unavailability's own date columns. */
+  startDate: string;
+  endDate: string;
+  venue: string | null;
+  clientName: string | null;
+  participantCount: number;
+  satisfactionScore: number | null;
+};
+
+type AssignedExperienceRow = {
+  id: string;
+  slug: string;
+  title: string;
+  status: ExperienceStatus;
+  start_date: string;
+  end_date: string;
+  venue: string | null;
+  facilitator_email: string | null;
+  clients: { name: string } | null;
+};
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+export async function getFacilitatorAssignedExperiences(
+  facilitatorEmail: string
+): Promise<FacilitatorAssignedExperience[]> {
+  const supabase = await createClient();
+
+  const { data: experienceRows, error: experiencesError } = await supabase
+    .from("experiences")
+    .select("id, slug, title, status, start_date, end_date, venue, facilitator_email, clients(name)")
+    .is("deleted_at", null)
+    .order("start_date", { ascending: true });
+
+  if (experiencesError) {
+    throw new Error(experiencesError.message);
+  }
+
+  const normalizedEmail = facilitatorEmail.toLowerCase();
+  const matched = ((experienceRows ?? []) as unknown as AssignedExperienceRow[]).filter(
+    (row) => row.facilitator_email?.toLowerCase() === normalizedEmail
+  );
+
+  if (matched.length === 0) {
+    return [];
+  }
+
+  const slugs = matched.map((row) => row.slug);
+  const ids = matched.map((row) => row.id);
+
+  const [{ data: participantRows, error: participantsError }, { data: responseRows, error: responsesError }] =
+    await Promise.all([
+      supabase.from("participants").select("id, workshop_slug").in("workshop_slug", slugs),
+      supabase
+        .from("survey_responses")
+        .select("overall_rating, workshop_id")
+        .in("workshop_id", ids)
+        .eq("survey_type", "satisfaction"),
+    ]);
+
+  if (participantsError) {
+    throw new Error(participantsError.message);
+  }
+  if (responsesError) {
+    throw new Error(responsesError.message);
+  }
+
+  const participantCountBySlug = new Map<string, number>();
+  for (const row of participantRows ?? []) {
+    participantCountBySlug.set(row.workshop_slug, (participantCountBySlug.get(row.workshop_slug) ?? 0) + 1);
+  }
+
+  const ratingsByExperienceId = new Map<string, number[]>();
+  for (const row of responseRows ?? []) {
+    if (row.overall_rating === null) continue;
+    const bucket = ratingsByExperienceId.get(row.workshop_id) ?? [];
+    bucket.push(row.overall_rating);
+    ratingsByExperienceId.set(row.workshop_id, bucket);
+  }
+
+  return matched.map((row) => {
+    const ratings = ratingsByExperienceId.get(row.id) ?? [];
+    return {
+      id: row.id,
+      slug: row.slug,
+      title: row.title,
+      status: row.status,
+      startDate: row.start_date.slice(0, 10),
+      endDate: row.end_date.slice(0, 10),
+      venue: row.venue,
+      clientName: row.clients?.name ?? null,
+      participantCount: participantCountBySlug.get(row.slug) ?? 0,
+      satisfactionScore: ratings.length > 0 ? round1(ratings.reduce((sum, v) => sum + v, 0) / ratings.length) : null,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Stats summary — the four figures shown above the calendar/list on My
+// Programs (CLAUDE.md: "Total assigned … Upcoming (next 30 days) …
+// Completed this year … Average satisfaction score across all delivered
+// experiences"). Derived from the same assigned-experiences query rather
+// than a separate aggregate query.
+// ---------------------------------------------------------------------------
+
+export type FacilitatorPortalStats = {
+  totalAssigned: number;
+  upcomingNext30Days: number;
+  completedThisYear: number;
+  averageSatisfaction: number | null;
+};
+
+export async function getFacilitatorPortalStats(facilitatorEmail: string): Promise<FacilitatorPortalStats> {
+  const experiences = await getFacilitatorAssignedExperiences(facilitatorEmail);
+
+  const today = todayIso();
+  const in30Days = new Date();
+  in30Days.setDate(in30Days.getDate() + 30);
+  const in30DaysIso = in30Days.toISOString().slice(0, 10);
+  const currentYear = new Date().getFullYear();
+
+  const upcomingNext30Days = experiences.filter(
+    (experience) => experience.startDate >= today && experience.startDate <= in30DaysIso
+  ).length;
+
+  const completedThisYear = experiences.filter(
+    (experience) => experience.status === "completed" && new Date(`${experience.startDate}T00:00:00`).getFullYear() === currentYear
+  ).length;
+
+  const satisfactionScores = experiences
+    .map((experience) => experience.satisfactionScore)
+    .filter((score): score is number => score !== null);
+
+  return {
+    totalAssigned: experiences.length,
+    upcomingNext30Days,
+    completedThisYear,
+    averageSatisfaction:
+      satisfactionScores.length > 0
+        ? round1(satisfactionScores.reduce((sum, v) => sum + v, 0) / satisfactionScores.length)
+        : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Experience detail — for the slide-over. Ownership is enforced in the
+// query itself (matching facilitator_email), not checked afterward, so a
+// mismatched experienceId simply comes back empty rather than confirming it
+// exists for someone else's assignment.
+// ---------------------------------------------------------------------------
+
+export type FacilitatorExperienceDetail = {
+  id: string;
+  slug: string;
+  title: string;
+  status: ExperienceStatus;
+  startDate: string;
+  endDate: string;
+  venue: string | null;
+  clientName: string | null;
+  engagementTitle: string | null;
+  participantCount: number;
+  checkedInCount: number;
+  checkInRate: number;
+  satisfactionScore: number | null;
+};
+
+export async function getFacilitatorExperienceDetail(
+  experienceId: string,
+  facilitatorEmail: string
+): Promise<FacilitatorExperienceDetail | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("experiences")
+    .select(
+      "id, slug, title, status, start_date, end_date, venue, facilitator_email, clients(name), engagements(title)"
+    )
+    .eq("id", experienceId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  type Row = {
+    id: string;
+    slug: string;
+    title: string;
+    status: ExperienceStatus;
+    start_date: string;
+    end_date: string;
+    venue: string | null;
+    facilitator_email: string | null;
+    clients: { name: string } | null;
+    engagements: { title: string } | null;
+  };
+
+  const row = data as unknown as Row | null;
+
+  if (!row || row.facilitator_email?.toLowerCase() !== facilitatorEmail.toLowerCase()) {
     return null;
   }
 
-  const clientObj = Array.isArray(row.clients) ? row.clients[0] : row.clients;
-  const engagementObj = Array.isArray(row.engagements) ? row.engagements[0] : row.engagements;
+  const [{ data: participantRows, error: participantsError }, { data: responseRows, error: responsesError }] =
+    await Promise.all([
+      supabase.from("participants").select("id, checked_in").eq("workshop_slug", row.slug),
+      supabase
+        .from("survey_responses")
+        .select("overall_rating")
+        .eq("workshop_id", row.id)
+        .eq("survey_type", "satisfaction"),
+    ]);
+
+  if (participantsError) {
+    throw new Error(participantsError.message);
+  }
+  if (responsesError) {
+    throw new Error(responsesError.message);
+  }
+
+  const participants = participantRows ?? [];
+  const checkedInCount = participants.filter((p) => p.checked_in).length;
+  const ratings = (responseRows ?? [])
+    .map((r) => r.overall_rating)
+    .filter((v): v is number => v !== null);
 
   return {
     id: row.id,
     slug: row.slug,
     title: row.title,
-    titleAr: row.title_ar,
-    experienceType: row.experience_type ?? "workshop",
-    status: row.status ?? "active",
+    status: row.status,
+    startDate: row.start_date.slice(0, 10),
+    endDate: row.end_date.slice(0, 10),
+    venue: row.venue,
+    clientName: row.clients?.name ?? null,
+    engagementTitle: row.engagements?.title ?? null,
+    participantCount: participants.length,
+    checkedInCount,
+    checkInRate: participants.length > 0 ? Math.round((checkedInCount / participants.length) * 100) : 0,
+    satisfactionScore: ratings.length > 0 ? round1(ratings.reduce((sum, v) => sum + v, 0) / ratings.length) : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Unavailability — read by both the facilitator portal (own blocks) and the
+// operator-facing facilitator detail page (read-only "Availability" section).
+// ---------------------------------------------------------------------------
+
+export type FacilitatorUnavailabilityBlock = {
+  id: string;
+  startDate: string;
+  endDate: string;
+  reason: string | null;
+  isPast: boolean;
+};
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export async function getFacilitatorUnavailability(facilitatorId: string): Promise<FacilitatorUnavailabilityBlock[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("facilitator_unavailability")
+    .select("id, start_date, end_date, reason")
+    .eq("facilitator_id", facilitatorId)
+    .is("deleted_at", null)
+    .order("start_date", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const today = todayIso();
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
     startDate: row.start_date,
     endDate: row.end_date,
-    venue: row.venue,
-    city: row.city,
-    country: row.country,
-    capacity: row.capacity ?? 0,
-    clientName: clientObj?.name ?? null,
-    engagementTitle: engagementObj?.title ?? null,
-    facilitatorEmail: row.facilitator_email,
-    facilitatorMaterialsSlug: row.facilitator_materials_slug ?? null,
+    reason: row.reason,
+    isPast: row.end_date < today,
+  }));
+}
+
+export type UnavailabilityConflict = {
+  hasConflict: boolean;
+  blocks: { startDate: string; endDate: string; reason: string | null }[];
+};
+
+/**
+ * The inverse check from checkAvailabilityConflict below — this asks "does
+ * the facilitator have an unavailability block covering these dates",
+ * used by the operator's experience assignment form (CLAUDE.md: "if a
+ * facilitator has an unavailability block covering the experience dates,
+ * show a warning in the assignment UI").
+ */
+export async function getFacilitatorUnavailabilityConflict(
+  facilitatorId: string,
+  startDate: string,
+  endDate: string
+): Promise<UnavailabilityConflict> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("facilitator_unavailability")
+    .select("start_date, end_date, reason")
+    .eq("facilitator_id", facilitatorId)
+    .is("deleted_at", null)
+    .lte("start_date", endDate)
+    .gte("end_date", startDate);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    hasConflict: (data ?? []).length > 0,
+    blocks: (data ?? []).map((row) => ({ startDate: row.start_date, endDate: row.end_date, reason: row.reason })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Availability conflict check — used both by the "Mark unavailable" flow
+// (warn, don't block) and, per CLAUDE.md's brief, by the operator's
+// experience assignment UI.
+// ---------------------------------------------------------------------------
+
+export type AvailabilityConflict = {
+  hasConflict: boolean;
+  experiences: { id: string; title: string; startDate: string; endDate: string }[];
+};
+
+export async function checkAvailabilityConflict(
+  facilitatorId: string,
+  startDate: string,
+  endDate: string
+): Promise<AvailabilityConflict> {
+  const supabase = await createClient();
+
+  const { data: facilitatorRow, error: facilitatorError } = await supabase
+    .from("facilitators")
+    .select("email")
+    .eq("id", facilitatorId)
+    .maybeSingle();
+
+  if (facilitatorError) {
+    throw new Error(facilitatorError.message);
+  }
+
+  if (!facilitatorRow) {
+    return { hasConflict: false, experiences: [] };
+  }
+
+  const { data: experienceRows, error: experiencesError } = await supabase
+    .from("experiences")
+    .select("id, title, start_date, end_date, facilitator_email")
+    .is("deleted_at", null)
+    .lte("start_date", endDate)
+    .gte("end_date", startDate);
+
+  if (experiencesError) {
+    throw new Error(experiencesError.message);
+  }
+
+  const normalizedEmail = facilitatorRow.email.toLowerCase();
+  const conflicting = (experienceRows ?? []).filter(
+    (row) => row.facilitator_email?.toLowerCase() === normalizedEmail
+  );
+
+  return {
+    hasConflict: conflicting.length > 0,
+    experiences: conflicting.map((row) => ({
+      id: row.id,
+      title: row.title,
+      startDate: row.start_date,
+      endDate: row.end_date,
+    })),
   };
 }

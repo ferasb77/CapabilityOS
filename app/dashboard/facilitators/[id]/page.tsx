@@ -69,7 +69,7 @@ export default async function FacilitatorDetailPage({ params }: Props) {
     notFound();
   }
 
-  const [history, accessStatus, unavailabilityBlocks] = await Promise.all([
+  const [history, access, unavailabilityBlocks] = await Promise.all([
     getFacilitatorDeliveryHistory(facilitator.email),
     getFacilitatorPortalAccessStatus(facilitator.id),
     getFacilitatorUnavailability(facilitator.id),
@@ -87,7 +87,7 @@ export default async function FacilitatorDetailPage({ params }: Props) {
         Back to facilitators
       </Link>
 
-      <PortalAccessCard facilitatorId={facilitator.id} accessStatus={accessStatus} />
+      <PortalAccessCard facilitatorId={facilitator.id} access={access} />
 
       <Card className="bg-surface-elevated">
         <CardContent className="flex flex-wrap items-start justify-between gap-6">

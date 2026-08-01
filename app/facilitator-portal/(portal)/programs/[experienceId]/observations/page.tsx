@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { FacilitatorPortalHeader } from "@/features/facilitator-portal/components/facilitator-portal-header";
 import { getFacilitatorExperienceDetail, getFacilitatorPortalSessionContext } from "@/features/facilitator-portal/data";
 import { getExperienceParticipants } from "@/features/experiences/data";
 import {
@@ -46,10 +45,8 @@ export default async function FacilitatorObservationsPage({ params }: Props) {
   const participantNameById = new Map(participants.map((p) => [p.id, `${p.firstName} ${p.lastName}`]));
 
   return (
-    <main className="min-h-screen bg-night text-ivory">
-      <FacilitatorPortalHeader fullName={portalUser.fullName} photoUrl={portalUser.photoUrl} />
-      <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6">
-        <Link
+    <div className="mx-auto max-w-3xl space-y-6">
+      <Link
           href="/facilitator-portal/programs"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-gold"
         >
@@ -149,7 +146,6 @@ export default async function FacilitatorObservationsPage({ params }: Props) {
             )}
           </CardContent>
         </Card>
-      </div>
-    </main>
+    </div>
   );
 }

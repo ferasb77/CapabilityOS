@@ -203,6 +203,9 @@ export type FacilitatorProfile = {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  portalInvitedAt: string | null;
+  portalInvitationAcceptedAt: string | null;
+  portalAccessActive: boolean;
 };
 
 type FacilitatorProfileRow = {
@@ -229,6 +232,9 @@ type FacilitatorProfileRow = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  invited_at: string | null;
+  invitation_accepted_at: string | null;
+  portal_access_active: boolean;
 };
 
 function mapProfile(row: FacilitatorProfileRow): FacilitatorProfile {
@@ -257,6 +263,9 @@ function mapProfile(row: FacilitatorProfileRow): FacilitatorProfile {
     isActive: row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    portalInvitedAt: row.invited_at,
+    portalInvitationAcceptedAt: row.invitation_accepted_at,
+    portalAccessActive: row.portal_access_active,
   };
 }
 
@@ -266,7 +275,7 @@ export async function getFacilitatorById(id: string): Promise<FacilitatorProfile
   const { data, error } = await supabase
     .from("facilitators")
     .select(
-      "id, first_name, last_name, email, phone, photo_url, bio, title, organization, years_experience, expertise_areas, certifications, languages, regions, willing_to_travel, travel_notes, passport_expiry, visa_countries, availability_status, availability_notes, is_active, created_at, updated_at"
+      "id, first_name, last_name, email, phone, photo_url, bio, title, organization, years_experience, expertise_areas, certifications, languages, regions, willing_to_travel, travel_notes, passport_expiry, visa_countries, availability_status, availability_notes, is_active, created_at, updated_at, invited_at, invitation_accepted_at, portal_access_active"
     )
     .eq("id", id)
     .maybeSingle();

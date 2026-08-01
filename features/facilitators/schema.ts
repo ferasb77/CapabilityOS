@@ -76,8 +76,3 @@ export type CreateFacilitatorInput = z.infer<typeof createFacilitatorSchema>;
 export const updateFacilitatorSchema = createFacilitatorSchema;
 
 export type UpdateFacilitatorInput = z.infer<typeof updateFacilitatorSchema>;
-
-// Alias export for backwards compatibility
-// features/facilitators/schema.ts
-export const updateFacilitatorProfileSchema = updateFacilitatorSchema;
-export type UpdateFacilitatorProfileInput = UpdateFacilitatorInput;

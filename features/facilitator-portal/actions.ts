@@ -11,162 +11,194 @@ import { createServiceRoleClient } from "@/infrastructure/supabase/service-role"
 import { getSessionContext } from "@/infrastructure/session/session-context";
 import { toActionError } from "@/shared/errors/action-error";
 
-import { updateFacilitatorProfileSchema, type UpdateFacilitatorProfileInput } from "./schema";
-// We alias the import to checkDataConflict to avoid naming collisions with the local function
-import { checkUnavailabilityConflict as checkDataConflict, getFacilitatorPortalSessionContext, type UnavailabilityConflict } from "./data";
+import {
+  acceptFacilitatorInvitationSchema,
+  addUnavailabilitySchema,
+  documentsSchema,
+  expertiseCertificationsSchema,
+  languagesRegionsSchema,
+  personalProfessionalSchema,
+} from "./schema";
+import {
+  checkAvailabilityConflict,
+  getFacilitatorExperienceDetail,
+  getFacilitatorPortalUser,
+  getFacilitatorUnavailabilityConflict,
+  type AvailabilityConflict,
+  type FacilitatorExperienceDetail,
+  type UnavailabilityConflict,
+} from "./data";
+import { uploadFacilitatorPhoto } from "./storage";
 
 function acceptUrlFor(token: string): string {
   return `${requireEnv("NEXT_PUBLIC_APP_URL").replace(/\/$/, "")}/facilitator-portal/accept?token=${token}`;
 }
 
-async function sendInvitationEmail(
-  organizationName: string,
-  email: string,
-  token: string
-): Promise<string | null> {
+async function sendInvitationEmail(email: string, token: string): Promise<string | null> {
   const { subject, html } = renderFacilitatorPortalInvitationEmail({
-    organizationName,
+    organizationName: "Enable My Growth",
     acceptUrl: acceptUrlFor(token),
   });
 
   try {
     const resend = getResendClient();
-    const { error } = await resend.emails.send({
-      from: getResendFromAddress(),
-      to: email,
-      subject,
-      html,
-    });
+    const { error } = await resend.emails.send({ from: getResendFromAddress(), to: email, subject, html });
 
     if (error) {
-      return toActionError(error, "facilitator-portal", "Unable to send invitation email.");
+      return toActionError(error, "facilitator-portal", "Unable to send the invitation email.");
     }
   } catch (error) {
-    return error instanceof Error ? error.message : "Unable to send invitation email.";
+    return error instanceof Error ? error.message : "Unable to send the invitation email.";
   }
 
   return null;
 }
 
+/**
+ * `facilitators` has no workspace_id/organization_id of its own (it
+ * predates the Engineering Constitution's multi-tenancy rule — see
+ * migration 0007's header). facilitator_unavailability still must carry
+ * both per the rule, so this resolves them the same way daily_attendance's
+ * check-in RPC (0026) and facilitator_reports (0027) do for this
+ * single-tenant deployment: the one existing workspace/organization row.
+ */
+export async function resolveDefaultWorkspace(): Promise<{ workspaceId: string; organizationId: string } | null> {
+  const supabase = createServiceRoleClient();
+
+  const { data, error } = await supabase.from("workspaces").select("id, organization_id").limit(1).maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return { workspaceId: data.id, organizationId: data.organization_id };
+}
+
 // ---------------------------------------------------------------------------
-// Operator actions: Invite / Resend / Deactivate
+// Invite / resend / deactivate — operator-side, from the facilitator detail
+// page. Mirrors features/client-portal/actions.ts's inviteClientPortalUser
+// pattern (CLAUDE.md: "invitation flow mirrors the client portal invitation
+// pattern from Sprint 32").
 // ---------------------------------------------------------------------------
 
-export type InviteActionResult = { success: true } | { success: false; error: string };
+export type InviteFacilitatorResult = { success: true } | { success: false; error: string };
 
-export async function inviteFacilitatorToPortal(facilitatorId: string): Promise<InviteActionResult> {
+export async function inviteFacilitatorToPortal(facilitatorId: string): Promise<InviteFacilitatorResult> {
   const session = await getSessionContext();
   const supabase = await createClient();
 
   const { data: facilitator, error: fetchError } = await supabase
     .from("facilitators")
-    .select("id, email, invitation_token, auth_user_id, is_active")
+    .select("email, invitation_accepted_at, invitation_token")
     .eq("id", facilitatorId)
     .maybeSingle();
 
-  if (fetchError || !facilitator) {
+  if (fetchError) {
+    return { success: false, error: toActionError(fetchError, "facilitator-portal") };
+  }
+
+  if (!facilitator) {
     return { success: false, error: "Facilitator not found." };
   }
 
-  if (facilitator.auth_user_id) {
+  if (facilitator.invitation_accepted_at) {
     return { success: false, error: "This facilitator has already accepted their portal invitation." };
   }
 
-  // Ensure an invitation token exists
-  let token = facilitator.invitation_token;
-  if (!token) {
-    const serviceClient = createServiceRoleClient();
-    const { data: updated, error: updateErr } = await serviceClient
-      .from("facilitators")
-      .update({
-        invited_at: new Date().toISOString(),
-        invited_by: session.userId,
-      })
-      .eq("id", facilitatorId)
-      .select("invitation_token")
-      .single();
+  const { data: updated, error: updateError } = await supabase
+    .from("facilitators")
+    .update({
+      invited_at: new Date().toISOString(),
+      invited_by: session.userId,
+      portal_access_active: true,
+    })
+    .eq("id", facilitatorId)
+    .select("invitation_token")
+    .single();
 
-    if (updateErr || !updated) {
-      return { success: false, error: "Failed to generate invitation token." };
-    }
-    token = updated.invitation_token;
-  } else {
-    await supabase
-      .from("facilitators")
-      .update({
-        invited_at: new Date().toISOString(),
-        invited_by: session.userId,
-      })
-      .eq("id", facilitatorId);
+  if (updateError) {
+    return { success: false, error: toActionError(updateError, "facilitator-portal") };
   }
 
-  if (token) {
-    const emailErr = await sendInvitationEmail(
-      session.organizationName || "Enable My Growth",
-      facilitator.email,
-      token
-    );
-    if (emailErr) {
-      return { success: false, error: emailErr };
-    }
+  const token = updated.invitation_token ?? facilitator.invitation_token;
+
+  if (!token) {
+    return { success: false, error: "Unable to generate an invitation link. Please try again." };
+  }
+
+  const emailError = await sendInvitationEmail(facilitator.email, token);
+  if (emailError) {
+    return { success: false, error: emailError };
   }
 
   revalidatePath(`/dashboard/facilitators/${facilitatorId}`);
   return { success: true };
 }
 
-export async function resendFacilitatorInvitation(facilitatorId: string): Promise<InviteActionResult> {
-  const session = await getSessionContext();
+export type ResendFacilitatorInvitationResult = { success: true } | { success: false; error: string };
+
+export async function resendFacilitatorInvitation(facilitatorId: string): Promise<ResendFacilitatorInvitationResult> {
   const supabase = await createClient();
 
   const { data: facilitator, error } = await supabase
     .from("facilitators")
-    .select("id, email, invitation_token")
+    .select("email, invitation_token")
     .eq("id", facilitatorId)
     .maybeSingle();
 
-  if (error || !facilitator || !facilitator.invitation_token) {
-    return { success: false, error: "Invitation record not found." };
+  if (error) {
+    return { success: false, error: toActionError(error, "facilitator-portal") };
   }
 
-  const emailErr = await sendInvitationEmail(
-    session.organizationName || "Enable My Growth",
-    facilitator.email,
-    facilitator.invitation_token
-  );
-
-  if (emailErr) {
-    return { success: false, error: emailErr };
+  if (!facilitator || !facilitator.invitation_token) {
+    return { success: false, error: "Invitation not found." };
   }
 
-  await supabase
+  const emailError = await sendInvitationEmail(facilitator.email, facilitator.invitation_token);
+  if (emailError) {
+    return { success: false, error: emailError };
+  }
+
+  const { error: touchError } = await supabase
     .from("facilitators")
     .update({ invited_at: new Date().toISOString() })
     .eq("id", facilitatorId);
+
+  if (touchError) {
+    return { success: false, error: toActionError(touchError, "facilitator-portal") };
+  }
 
   revalidatePath(`/dashboard/facilitators/${facilitatorId}`);
   return { success: true };
 }
 
-export async function deactivateFacilitatorPortal(facilitatorId: string): Promise<InviteActionResult> {
-  await getSessionContext();
+export type TogglePortalAccessResult = { success: true; isActive: boolean } | { success: false; error: string };
+
+/** Toggles portal_access_active — same action backs the operator's
+ * Deactivate/Reactivate control either direction. Deliberately independent
+ * of `is_active` (directory visibility) — see migration 0030's comment. */
+export async function togglePortalAccess(facilitatorId: string): Promise<TogglePortalAccessResult> {
   const supabase = await createClient();
 
-  const { data: existing, error: fetchErr } = await supabase
+  const { data: existing, error: fetchError } = await supabase
     .from("facilitators")
-    .select("is_active")
+    .select("portal_access_active")
     .eq("id", facilitatorId)
     .maybeSingle();
 
-  if (fetchErr || !existing) {
+  if (fetchError) {
+    return { success: false, error: toActionError(fetchError, "facilitator-portal") };
+  }
+
+  if (!existing) {
     return { success: false, error: "Facilitator not found." };
   }
 
-  const nextIsActive = !existing.is_active;
+  const next = !existing.portal_access_active;
 
   const { error } = await supabase
     .from("facilitators")
-    .update({ is_active: nextIsActive })
+    .update({ portal_access_active: next })
     .eq("id", facilitatorId);
 
   if (error) {
@@ -174,32 +206,35 @@ export async function deactivateFacilitatorPortal(facilitatorId: string): Promis
   }
 
   revalidatePath(`/dashboard/facilitators/${facilitatorId}`);
-  return { success: true };
+  return { success: true, isActive: next };
 }
 
 // ---------------------------------------------------------------------------
-// Invitation acceptance (Public route)
+// Invitation acceptance — public route, no session yet.
 // ---------------------------------------------------------------------------
 
-export type AcceptInvitationResult = { success: false; error: string } | { success: true };
+export type AcceptFacilitatorInvitationResult = { success: false; error: string } | { success: true };
 
-export async function acceptFacilitatorInvitation(
-  token: string,
-  password: string
-): Promise<AcceptInvitationResult> {
-  if (password.length < 8) {
-    return { success: false, error: "Password must be at least 8 characters." };
+export async function acceptFacilitatorInvitation(token: string, password: string): Promise<AcceptFacilitatorInvitationResult> {
+  const parsed = acceptFacilitatorInvitationSchema.safeParse({ token, password, confirmPassword: password });
+
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid submission." };
   }
 
   const serviceClient = createServiceRoleClient();
 
   const { data: facilitator, error: fetchError } = await serviceClient
     .from("facilitators")
-    .select("id, email, first_name, last_name, invitation_accepted_at, is_active")
+    .select("id, email, invitation_accepted_at, portal_access_active")
     .eq("invitation_token", token)
     .maybeSingle();
 
-  if (fetchError || !facilitator) {
+  if (fetchError) {
+    return { success: false, error: toActionError(fetchError, "facilitator-portal") };
+  }
+
+  if (!facilitator) {
     return { success: false, error: "This invitation link is invalid." };
   }
 
@@ -207,8 +242,8 @@ export async function acceptFacilitatorInvitation(
     return { success: false, error: "This invitation has already been accepted. Please sign in instead." };
   }
 
-  if (!facilitator.is_active) {
-    return { success: false, error: "This invitation is no longer active. Contact your program coordinator." };
+  if (!facilitator.portal_access_active) {
+    return { success: false, error: "This invitation is no longer active. Contact your coordinator." };
   }
 
   const { data: createdUser, error: createError } = await serviceClient.auth.admin.createUser({
@@ -229,22 +264,15 @@ export async function acceptFacilitatorInvitation(
 
   const { error: updateError } = await serviceClient
     .from("facilitators")
-    .update({
-      auth_user_id: createdUser.user.id,
-      invitation_accepted_at: new Date().toISOString(),
-    })
+    .update({ auth_user_id: createdUser.user.id, invitation_accepted_at: new Date().toISOString() })
     .eq("id", facilitator.id);
 
   if (updateError) {
     return { success: false, error: toActionError(updateError, "facilitator-portal") };
   }
 
-  // Log the user in
   const supabase = await createClient();
-  const { error: signInError } = await supabase.auth.signInWithPassword({
-    email: facilitator.email,
-    password,
-  });
+  const { error: signInError } = await supabase.auth.signInWithPassword({ email: facilitator.email, password });
 
   if (signInError) {
     return { success: false, error: "Account created — please sign in." };
@@ -254,123 +282,290 @@ export async function acceptFacilitatorInvitation(
 }
 
 // ---------------------------------------------------------------------------
-// Facilitator Self-Service: Update Profile
+// Self-service profile — validates the caller's own auth_user_id before
+// touching any row, so a facilitator can only ever edit their own profile
+// (CLAUDE.md: "Facilitators can only edit their own profile").
 // ---------------------------------------------------------------------------
 
-export type UpdateProfileResult =
-  | { success: true; lastSavedAt: string }
-  | { success: false; error: string };
+export type UpdateFacilitatorProfileResult =
+  | { success: true; savedAt: string }
+  | { success: false; error: string; fieldErrors?: Record<string, string[]> };
 
-export async function updateFacilitatorProfile(
-  facilitatorId: string,
-  data: UpdateFacilitatorProfileInput
-): Promise<UpdateProfileResult> {
-  const portalUser = await getFacilitatorPortalSessionContext();
-
-  if (portalUser.id !== facilitatorId) {
-    return { success: false, error: "You can only update your own profile." };
-  }
-
-  const parsed = updateFacilitatorProfileSchema.safeParse(data);
-  if (!parsed.success) {
-    return { success: false, error: "Please correct the invalid profile fields." };
-  }
-
+async function resolveOwnFacilitatorId(facilitatorId: string): Promise<{ error: string } | { facilitatorId: string }> {
   const supabase = await createClient();
 
-  const { error } = await supabase
-    .from("facilitators")
-    .update({
-      first_name: parsed.data.firstName,
-      last_name: parsed.data.lastName,
-      title: parsed.data.title ?? null,
-      organization: parsed.data.organization ?? null,
-      years_experience: parsed.data.yearsExperience ?? null,
-      bio: parsed.data.bio ?? null,
-      photo_url: parsed.data.photoUrl ?? null,
-      expertise_areas: parsed.data.expertiseAreas,
-      certifications: parsed.data.certifications,
-      languages: parsed.data.languages,
-      regions: parsed.data.regions,
-      willing_to_travel: parsed.data.willingToTravel,
-      travel_notes: parsed.data.travelNotes ?? null,
-      passport_expiry: parsed.data.passportExpiry ?? null,
-      visa_countries: parsed.data.visaCountries,
-    })
-    .eq("id", facilitatorId)
-    .eq("auth_user_id", (await supabase.auth.getUser()).data.user?.id ?? "");
-
-  if (error) {
-    return { success: false, error: toActionError(error, "facilitator-portal") };
-  }
-
-  revalidatePath("/facilitator-portal/profile");
-  return {
-    success: true,
-    lastSavedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Availability Management
-// ---------------------------------------------------------------------------
-
-export type AddUnavailabilityResult =
-  | { success: true; warning?: string }
-  | { success: false; error: string };
-
-export async function addUnavailability(
-  facilitatorId: string,
-  startDate: string,
-  endDate: string,
-  reason?: string
-): Promise<AddUnavailabilityResult> {
-  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return { success: false, error: "Not authenticated" };
+    return { error: "Your session has expired. Please sign in again." };
   }
 
-  // Resolve workspace ID from session context or service role
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("workspace_id")
-    .eq("id", user.id)
+  const { data: facilitator, error } = await supabase
+    .from("facilitators")
+    .select("id")
+    .eq("id", facilitatorId)
+    .eq("auth_user_id", user.id)
+    .eq("portal_access_active", true)
     .maybeSingle();
 
-  let workspaceId = profile?.workspace_id;
-
-  if (!workspaceId) {
-    // If signed in as facilitator
-    const { data: defaultWorkspace } = await supabase
-      .from("workspaces")
-      .select("id")
-      .limit(1)
-      .maybeSingle();
-    workspaceId = defaultWorkspace?.id;
+  if (error) {
+    return { error: toActionError(error, "facilitator-portal") };
   }
 
-  if (!workspaceId) {
-    return { success: false, error: "Workspace context missing." };
+  if (!facilitator) {
+    return { error: "You do not have permission to edit this profile." };
   }
 
-  // Check conflicts
-  const conflict = await checkDataConflict(facilitatorId, startDate, endDate);
-  let warningMessage: string | undefined;
+  return { facilitatorId: facilitator.id };
+}
 
-  if (conflict.hasConflict) {
-    warningMessage = `You have ${conflict.count} assigned program(s) during this period. Please contact your coordinator before blocking these dates.`;
+type ProfileSection = "personal" | "expertise" | "languages" | "documents";
+
+export async function updateFacilitatorProfile(
+  facilitatorId: string,
+  section: ProfileSection,
+  _prevState: UpdateFacilitatorProfileResult,
+  formData: FormData
+): Promise<UpdateFacilitatorProfileResult> {
+  const owned = await resolveOwnFacilitatorId(facilitatorId);
+  if ("error" in owned) {
+    return { success: false, error: owned.error };
   }
 
+  const supabase = await createClient();
+
+  if (section === "personal") {
+    const parsed = personalProfessionalSchema.safeParse({
+      firstName: formData.get("firstName")?.toString() ?? "",
+      lastName: formData.get("lastName")?.toString() ?? "",
+      title: formData.get("title")?.toString() ?? "",
+      organization: formData.get("organization")?.toString() ?? "",
+      yearsExperience: formData.get("yearsExperience")?.toString() ?? "",
+      bio: formData.get("bio")?.toString() ?? "",
+    });
+
+    if (!parsed.success) {
+      return { success: false, error: "Please correct the highlighted fields.", fieldErrors: parsed.error.flatten().fieldErrors };
+    }
+
+    const { error } = await supabase
+      .from("facilitators")
+      .update({
+        first_name: parsed.data.firstName,
+        last_name: parsed.data.lastName,
+        title: parsed.data.title || null,
+        organization: parsed.data.organization || null,
+        years_experience: parsed.data.yearsExperience ?? null,
+        bio: parsed.data.bio || null,
+      })
+      .eq("id", owned.facilitatorId);
+
+    if (error) {
+      return { success: false, error: toActionError(error, "facilitator-portal") };
+    }
+  } else if (section === "expertise") {
+    const parsed = expertiseCertificationsSchema.safeParse({
+      expertiseAreas: formData.get("expertiseAreas")?.toString() ?? "",
+      certifications: formData.get("certifications")?.toString() ?? "",
+    });
+
+    if (!parsed.success) {
+      return { success: false, error: "Please correct the highlighted fields.", fieldErrors: parsed.error.flatten().fieldErrors };
+    }
+
+    const { error } = await supabase
+      .from("facilitators")
+      .update({
+        expertise_areas: parsed.data.expertiseAreas,
+        certifications: parsed.data.certifications,
+      })
+      .eq("id", owned.facilitatorId);
+
+    if (error) {
+      return { success: false, error: toActionError(error, "facilitator-portal") };
+    }
+  } else if (section === "languages") {
+    const parsed = languagesRegionsSchema.safeParse({
+      languages: formData.get("languages")?.toString() ?? "",
+      regions: formData.getAll("regions").map(String),
+      willingToTravel: formData.get("willingToTravel")?.toString() ?? "",
+      travelNotes: formData.get("travelNotes")?.toString() ?? "",
+    });
+
+    if (!parsed.success) {
+      return { success: false, error: "Please correct the highlighted fields.", fieldErrors: parsed.error.flatten().fieldErrors };
+    }
+
+    const { error } = await supabase
+      .from("facilitators")
+      .update({
+        languages: parsed.data.languages,
+        regions: parsed.data.regions,
+        willing_to_travel: parsed.data.willingToTravel,
+        travel_notes: parsed.data.travelNotes || null,
+      })
+      .eq("id", owned.facilitatorId);
+
+    if (error) {
+      return { success: false, error: toActionError(error, "facilitator-portal") };
+    }
+  } else {
+    const parsed = documentsSchema.safeParse({
+      passportExpiry: formData.get("passportExpiry")?.toString() ?? "",
+      visaCountries: formData.getAll("visaCountries").map(String),
+    });
+
+    if (!parsed.success) {
+      return { success: false, error: "Please correct the highlighted fields.", fieldErrors: parsed.error.flatten().fieldErrors };
+    }
+
+    const { error } = await supabase
+      .from("facilitators")
+      .update({
+        passport_expiry: parsed.data.passportExpiry || null,
+        visa_countries: parsed.data.visaCountries,
+      })
+      .eq("id", owned.facilitatorId);
+
+    if (error) {
+      return { success: false, error: toActionError(error, "facilitator-portal") };
+    }
+  }
+
+  revalidatePath("/facilitator-portal/profile");
+  return { success: true, savedAt: new Date().toISOString() };
+}
+
+export type UploadFacilitatorPhotoResult = { success: true; photoUrl: string } | { success: false; error: string };
+
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const ALLOWED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+export async function uploadFacilitatorProfilePhoto(
+  facilitatorId: string,
+  formData: FormData
+): Promise<UploadFacilitatorPhotoResult> {
+  const owned = await resolveOwnFacilitatorId(facilitatorId);
+  if ("error" in owned) {
+    return { success: false, error: owned.error };
+  }
+
+  const file = formData.get("photo");
+  if (!(file instanceof File) || file.size === 0) {
+    return { success: false, error: "Choose a photo to upload." };
+  }
+
+  if (!ALLOWED_PHOTO_TYPES.includes(file.type)) {
+    return { success: false, error: "Photos must be JPG, PNG, or WEBP." };
+  }
+
+  if (file.size > MAX_PHOTO_BYTES) {
+    return { success: false, error: "Photos must be smaller than 5MB." };
+  }
+
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const photoUrl = await uploadFacilitatorPhoto(owned.facilitatorId, file.name, bytes, file.type);
+
+    const supabase = await createClient();
+    const { error } = await supabase.from("facilitators").update({ photo_url: photoUrl }).eq("id", owned.facilitatorId);
+
+    if (error) {
+      return { success: false, error: toActionError(error, "facilitator-portal") };
+    }
+
+    revalidatePath("/facilitator-portal/profile");
+    return { success: true, photoUrl };
+  } catch (error) {
+    return { success: false, error: toActionError(error, "facilitator-portal", "Unable to upload photo.") };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Experience detail — called from the client-side slide-over on the My
+// Programs page. Re-derives the caller's own facilitator identity from the
+// session rather than trusting a client-supplied email, then delegates to
+// getFacilitatorExperienceDetail's own ownership check.
+// ---------------------------------------------------------------------------
+
+export async function getFacilitatorExperienceDetailForPortal(
+  experienceId: string
+): Promise<FacilitatorExperienceDetail | null> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return null;
+  }
+
+  const portalUser = await getFacilitatorPortalUser(user.id);
+  if (!portalUser) {
+    return null;
+  }
+
+  return getFacilitatorExperienceDetail(experienceId, portalUser.email);
+}
+
+export async function checkFacilitatorUnavailabilityForAssignment(
+  facilitatorId: string,
+  startDate: string,
+  endDate: string
+): Promise<UnavailabilityConflict> {
+  return getFacilitatorUnavailabilityConflict(facilitatorId, startDate, endDate);
+}
+
+// ---------------------------------------------------------------------------
+// Availability
+// ---------------------------------------------------------------------------
+
+export async function checkUnavailabilityConflict(
+  facilitatorId: string,
+  startDate: string,
+  endDate: string
+): Promise<AvailabilityConflict> {
+  return checkAvailabilityConflict(facilitatorId, startDate, endDate);
+}
+
+export type AddUnavailabilityResult =
+  | { success: true; conflict: AvailabilityConflict }
+  | { success: false; error: string; fieldErrors?: Record<string, string[]> };
+
+export async function addUnavailability(
+  facilitatorId: string,
+  startDate: string,
+  endDate: string,
+  reason: string | undefined
+): Promise<AddUnavailabilityResult> {
+  const owned = await resolveOwnFacilitatorId(facilitatorId);
+  if ("error" in owned) {
+    return { success: false, error: owned.error };
+  }
+
+  const parsed = addUnavailabilitySchema.safeParse({ startDate, endDate, reason });
+  if (!parsed.success) {
+    return { success: false, error: "Please correct the highlighted fields.", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const workspace = await resolveDefaultWorkspace();
+  if (!workspace) {
+    return { success: false, error: "Unable to save — workspace not configured." };
+  }
+
+  const conflict = await checkAvailabilityConflict(owned.facilitatorId, parsed.data.startDate, parsed.data.endDate);
+
+  const supabase = await createClient();
   const { error } = await supabase.from("facilitator_unavailability").insert({
-    facilitator_id: facilitatorId,
-    workspace_id: workspaceId,
-    start_date: startDate,
-    end_date: endDate,
-    reason: reason || null,
+    facilitator_id: owned.facilitatorId,
+    organization_id: workspace.organizationId,
+    workspace_id: workspace.workspaceId,
+    start_date: parsed.data.startDate,
+    end_date: parsed.data.endDate,
+    reason: parsed.data.reason || null,
   });
 
   if (error) {
@@ -378,16 +573,42 @@ export async function addUnavailability(
   }
 
   revalidatePath("/facilitator-portal/availability");
-  revalidatePath(`/dashboard/facilitators/${facilitatorId}`);
-  return { success: true, warning: warningMessage };
+  return { success: true, conflict };
 }
 
-export async function removeUnavailability(unavailabilityId: string): Promise<InviteActionResult> {
+export type RemoveUnavailabilityResult = { success: true } | { success: false; error: string };
+
+export async function removeUnavailability(unavailabilityId: string): Promise<RemoveUnavailabilityResult> {
   const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Your session has expired. Please sign in again." };
+  }
+
+  // Ownership is enforced by joining through facilitators.auth_user_id, not
+  // by trusting the caller-supplied id alone.
+  const { data: block, error: fetchError } = await supabase
+    .from("facilitator_unavailability")
+    .select("id, facilitators!inner(auth_user_id)")
+    .eq("id", unavailabilityId)
+    .eq("facilitators.auth_user_id", user.id)
+    .maybeSingle();
+
+  if (fetchError) {
+    return { success: false, error: toActionError(fetchError, "facilitator-portal") };
+  }
+
+  if (!block) {
+    return { success: false, error: "Unavailability block not found." };
+  }
 
   const { error } = await supabase
     .from("facilitator_unavailability")
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq("id", unavailabilityId);
 
   if (error) {
@@ -398,57 +619,14 @@ export async function removeUnavailability(unavailabilityId: string): Promise<In
   return { success: true };
 }
 
+// ---------------------------------------------------------------------------
+// Facilitator portal sign out — same Supabase Auth system as the operator
+// dashboard's features/auth/actions.ts signOut(); the shared /login page is
+// the correct landing spot for either kind of user signing out.
+// ---------------------------------------------------------------------------
+
 export async function facilitatorPortalSignOut() {
   const supabase = await createClient();
   await supabase.auth.signOut();
   redirect("/login");
-}
-
-export async function checkUnavailabilityConflict(
-  facilitatorId: string,
-  startDate: string,
-  endDate: string
-) {
-  return checkDataConflict(facilitatorId, startDate, endDate);
-}
-
-export async function checkFacilitatorUnavailabilityForAssignment(
-  facilitatorId: string,
-  startDate: string,
-  endDate: string
-): Promise<UnavailabilityConflict> {
-  const supabase = await createClient();
-
-  if (!facilitatorId || !startDate || !endDate) {
-    return { hasConflict: false, count: 0, conflictingExperiences: [], experiences: [] };
-  }
-
-  const reqStart = startDate.slice(0, 10);
-  const reqEnd = endDate.slice(0, 10);
-
-  const { data: blocks } = await supabase
-    .from("facilitator_unavailability")
-    .select("id, start_date, end_date, reason")
-    .eq("facilitator_id", facilitatorId);
-
-  const matchingBlocks = (blocks || []).filter((b) => {
-    const bStart = b.start_date.slice(0, 10);
-    const bEnd = b.end_date.slice(0, 10);
-    return bStart <= reqEnd && bEnd >= reqStart;
-  });
-
-  const conflict = await checkDataConflict(facilitatorId, startDate, endDate);
-
-  return {
-    hasConflict: matchingBlocks.length > 0 || conflict.hasConflict,
-    count: matchingBlocks.length + conflict.count,
-    conflictingExperiences: conflict.conflictingExperiences || [],
-    experiences: conflict.conflictingExperiences || [],
-    unavailabilityBlocks: matchingBlocks.map((b) => ({
-      id: b.id,
-      startDate: b.start_date,
-      endDate: b.end_date,
-      reason: b.reason,
-    })),
-  };
 }

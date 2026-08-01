@@ -18,37 +18,39 @@ export async function login(
   const email = formData.get("email")?.toString().trim() ?? "";
   const password = formData.get("password")?.toString() ?? "";
 
-  const { data: authData, error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,
   });
 
-  if (error || !authData.user) {
+  if (error) {
     return {
       error: toActionError(error, "auth"),
     };
   }
 
-  const userId = authData.user.id;
+  // Operators and facilitators share this one /login page (Sprint 34) — the
+  // post-auth landing spot depends on which table auth.uid() resolves
+  // against. A password match with no matching profiles or facilitators row
+  // (e.g. a client portal contact who wandered onto the wrong login page)
+  // is signed back out rather than left with a session that goes nowhere.
+  const userId = data.user?.id;
 
-  const [{ data: profile }, { data: portalUser }, { data: facilitator }] = await Promise.all([
-    supabase.from("profiles").select("id").eq("id", userId).maybeSingle(),
-    supabase.from("client_portal_users").select("id").eq("auth_user_id", userId).eq("is_active", true).maybeSingle(),
-    supabase.from("facilitators").select("id").eq("auth_user_id", userId).eq("is_active", true).maybeSingle(),
+  const [{ data: profile }, { data: facilitator }] = await Promise.all([
+    supabase.from("profiles").select("id").eq("id", userId ?? "").maybeSingle(),
+    supabase.from("facilitators").select("id").eq("auth_user_id", userId ?? "").eq("portal_access_active", true).maybeSingle(),
   ]);
 
   if (profile) {
     redirect("/dashboard");
-  } else if (portalUser) {
-    redirect("/client-portal");
-  } else if (facilitator) {
-    redirect("/facilitator-portal");
-  } else {
-    await supabase.auth.signOut();
-    return {
-      error: "Account not found",
-    };
   }
+
+  if (facilitator) {
+    redirect("/facilitator-portal");
+  }
+
+  await supabase.auth.signOut();
+  return { error: "Account not found." };
 }
 
 export async function signOut() {

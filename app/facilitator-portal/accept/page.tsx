@@ -4,7 +4,7 @@ import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { getFacilitatorInvitationByToken } from "@/features/facilitator-portal/data";
-import { AcceptInvitationForm } from "@/features/facilitator-portal/components/accept-invitation-form";
+import { AcceptFacilitatorInvitationForm } from "@/features/facilitator-portal/components/accept-invitation-form";
 
 type Props = {
   searchParams: Promise<{ token?: string }>;
@@ -80,11 +80,7 @@ export default async function AcceptFacilitatorInvitationPage({ searchParams }: 
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-night p-6">
-      <AcceptInvitationForm
-        token={token}
-        fullName={invitation.fullName}
-        email={invitation.email}
-      />
+      <AcceptFacilitatorInvitationForm token={token} fullName={invitation.fullName} />
     </main>
   );
 }
